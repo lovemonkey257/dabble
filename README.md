@@ -13,4 +13,8 @@ A DAB radio project based on a PI, small LCD and some LED encoders. Very much a 
 - Modififed version of of eti-cmdline from JvanKatwijk. Forked here https://github.com/lovemonkey257/eti-stuff
 - dablin, https://github.com/Opendigitalradio/dablin
 
+## Build
+TODO
 
+## Config
+TODO
