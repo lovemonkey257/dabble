@@ -2,7 +2,7 @@
 A DAB radio project based on a PI, small LCD and some LED encoders. Very much a work in progress.
 
 ## Components
--  >PI3
+- PI3 or greater. I'm currently using a PI5 which is probably overkill
 - [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
 - 2 x [LED encoders](https://shop.pimoroni.com/products/rgb-encoder-breakout) although I may change these to ones that include a button. But LEDS....
 - RTLSDR (a cheap one will probably do, I'm using an official RTL-SDR.com v3)
