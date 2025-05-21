@@ -14,6 +14,9 @@ import pyaudio
 import numpy as np
 from pathlib import Path
 
+#test
+import math
+
 dablin_proc=None
 
 class Knob():
@@ -47,7 +50,7 @@ class Knob():
         return (r,g,b)
 
 class UI():
-    def __init__(self, station_font_size=18):
+    def __init__(self, station_font_size=19):
         # Create ST7735 LCD display class.
         self.disp = st7735.ST7735(
             port=0,
@@ -67,14 +70,14 @@ class UI():
 
         self.station_font_size = station_font_size
         self.font_dir=Path("/usr/share/fonts/truetype/")
-        self.station_font_file=str(self.font_dir / "/quicksand/Quicksand-Light.ttf")
+        self.station_font_file=str(self.font_dir  / "/piboto/PibotoCondensed-Bold.ttf")
         self.ensemble_font_file=str(self.font_dir / "/quicksand/Quicksand-Light.ttf")
 
         self.station_font = ImageFont.truetype(self.station_font_file, station_font_size)
-        self.ensemble_font = ImageFont.truetype(self.ensemble_font_file, 12)
+        self.ensemble_font = ImageFont.truetype(self.ensemble_font_file, 13)
 
         # Set default font
-        self.draw.font = self.station_font
+        # self.draw.font = self.station_font
 
         self.station_name_x = self.WIDTH 
         self.station_name_size_x = 0
@@ -172,12 +175,13 @@ player=RadioPlayer(radio_stations=RadioStations())
 player.play("Magic Radio")
 
 channel_knob=Knob()
-
 ui=UI()
+
 ui.clear()
 ui.draw_station_name("Dabble Radio")
-ui.draw_ensemble("(c)digital-gangsters")
+ui.draw_ensemble("(c) digital-gangsters 2025")
 ui.update()
+time.sleep(2)
 
 p=pyaudio.PyAudio()
 stream=p.open(format=pyaudio.paInt16,
@@ -239,6 +243,10 @@ while True:
     wav=np.frombuffer(d,dtype='int16')
     ch_l=wav[0::2]
     ch_r=wav[1::2]
+    fft_data = np.fft.fft(wav)
+    freq_bins = np.fft.fftfreq(len(fft_data), 1 / 44100)                    
+    print(fft_data)
+
     # peakL = np.abs(np.max(ch_l)-np.min(ch_l))/maxValue*100
     peakL = np.abs(np.max(ch_l))/maxValue*100
     #peakR = np.abs(np.max(ch_r)-np.min(ch_r))/maxValue*100
