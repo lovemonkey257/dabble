@@ -14,7 +14,24 @@ A DAB radio project based on a PI, small LCD and some LED encoders. Very much a 
 - dablin, https://github.com/Opendigitalradio/dablin
 
 ## Build
-TODO
+
+### `dablin`
+- `sudo apt install dablin`
+
+### `eti-cmdline`
+- `git clone https://github.com/lovemonkey257/eti-stuff.git`
+- `cd eti-stuff\eti-cmdline`
+- `mkdir build && cd build`
+- `cmake .. -DRTLSDR=ON`
+- `make && sudo make install`
+
+This should put `eti-cmdline-rtlsdr` into `/usr/local/bin`
+
+### Python
+- `sudo apt install python3-alsaaudio`
+- Create venv `pip -mvenv venv`
+- Edit ./venv/pyvenv.cfg and ensure `include-system-site-packages` is `true`
+- `pip install -r requirements.txt`
 
 ## Config
 TODO
