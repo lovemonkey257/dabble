@@ -1,6 +1,20 @@
 # dabble
 A DAB radio project based on a PI, small LCD and some LED encoders. Very much a work in progress.
 
+## Current progress
+- Moved to modules
+- Currently using single encoder so using key presses to simulate other functions
+- UI much improved. Three visualisers: FFT, Waveform and Levels
+- Scanning works
+
+## Current problems:
+- Need another encoder as UI is difficult otherwise
+- Need to decide on audio output e.g. DAC or ??
+- Some UI artifacts which may indicate timing issues?
+- Proper build perhaps into containers
+- Need to refactor dablin so it publishes service labels and updates e.g. now playing. The GTK version version does this. 
+- How does dablin/eti-cmdline communiate with other components? MQTT, D-BUS?
+
 ## Components
 - PI3 or greater. I'm currently using a PI5 which is probably overkill. Will probably try a Pi Zero W.
 - [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
