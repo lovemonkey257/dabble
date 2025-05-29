@@ -1,3 +1,8 @@
+ensemble*.json
+station-list.json
+dabble_radio.json
+sorted_stations.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
