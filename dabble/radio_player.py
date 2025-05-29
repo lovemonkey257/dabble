@@ -67,6 +67,8 @@ class RadioPlayer():
         # Cant scan while RTL is in use
         self.stop()
 
+        stations=dict()
+
         # Get multiplex blocks
         self.load_multiplexes()
         for block in sorted(self.multiplexes):
@@ -80,10 +82,26 @@ class RadioPlayer():
                     "scantime": 8
                 }))
             )
+            
+            ensemble_file = Path(f'ensemble-ch-{block}.json')
+            if ensemble_file.exists():
+                with open(ensemble_file, 'r') as jfile:
+                    data = json.load(jfile)
+                    ui_msg_callback("Done", f"{data['ensemble']} {len(data['stations'])} stations")
+                    for s,sid in data['stations'].items():
+                        if s not in stations:
+                            stations[s]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }
+                        else:
+                            stations[s + " " + data['ensemble'] ]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }                  
+            else:
+                ui_msg_callback(f'No stations')    
+
+            time.sleep(1)
 
         if ui_msg_callback is not None:
             ui_msg_callback(f'Storing Data')
-        stations=dict()
+
+        '''
         ensembles=Path(".")
         for ensemble_json_file in list(ensembles.glob('ensemble-ch-*.json')):
             with open(ensemble_json_file, 'r') as jfile:
@@ -93,9 +111,15 @@ class RadioPlayer():
                         stations[s]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }
                     else:
                         stations[s + " " + data['ensemble'] ]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }
+        '''
+
         with open("station-list.json","w") as s:
             json.dump(stations,s)
+
         self.radio_stations.load_stations()
+
+        if ui_msg_callback is not None:
+            ui_msg_callback(f'Found {self.radio_stations.total_stations} stations')
 
        
     

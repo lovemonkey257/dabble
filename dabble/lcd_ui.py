@@ -1,12 +1,31 @@
+from dataclasses import dataclass
 import logging
 from PIL import Image, ImageDraw, ImageFont
 import st7735
 from pathlib import Path
 import colorsys
+import numpy as np
+import math
+
+@dataclass
+class UIState():
+    station_name: str = ""
+    ensemble: str = ""
+    volume: int = 40
+    peak_l: int = 0
+    peak_r: int = 0
+    signal: np.ndarray = None
+    pulse_left_led_encoder:bool = False
+    left_led_rgb = (255,255,255)
+    pulse_right_led_encoder:bool = False
+    right_led_rgb = (255,255,255)
+    visualiser_enabled:bool =  False
+    visualiser:str = "graphic_equaliser" # Or "waveform"
+    levels_enabled:bool =  True
 
 class LCDUI():
-    
-    def __init__(self, station_font_size=19, ensemble_font_size=12):
+   
+    def __init__(self, station_font_size=20, ensemble_font_size=13):
         # Create ST7735 LCD display class.
         self.disp = st7735.ST7735(
             port=0,
@@ -27,44 +46,116 @@ class LCDUI():
         self.draw = ImageDraw.Draw(self.img)
 
         self.station_font_size = station_font_size
+
         self.font_dir=Path("/usr/share/fonts/truetype/")
-        self.station_font_file=str(self.font_dir  / "/quicksand/Quicksand-Regular.ttf")
-        self.ensemble_font_file=str(self.font_dir / "/quicksand/Quicksand-Light.ttf")
+        self.base_font = "liberation/LiberationSans"  # "quickstand/Quicksand"
+
+        self.station_font_file  = self.get_font_path("Regular")  # Regualr # str(self.font_dir  / "/quicksand/Quicksand-Bold.ttf")
+        self.ensemble_font_file = self.get_font_path("Regular") # Light # str(self.font_dir / "/quicksand/Quicksand-Light.ttf")
 
         self.station_font = ImageFont.truetype(self.station_font_file, station_font_size)
         self.ensemble_font = ImageFont.truetype(self.ensemble_font_file, ensemble_font_size)
+        self.vol_font = ImageFont.truetype(self.ensemble_font_file, ensemble_font_size)
 
         self.station_name_x = self.WIDTH 
         self.station_name_size_x = 0
 
+        self.colours = {
+            "ensemble": '#B8B814', # (251,80, 18),
+            "station":  '#FEFE33', # (255, 243,10),
+            "volume":   '#EFD4F7', # (203, 186, 237),
+            "volume_bg": (0, 102, 0),
+            "equaliser_line": 'darkviolet',
+            "equaliser_dot":  'deepskyblue'
+        }
+        self.last_l_level=0
+        self.last_r_level=0
+        self.last_max_l_level=0
+        self.last_max_r_level=0
+        self.last_max_signal=np.zeros(1024)
+
+        self.state = UIState()
+
+    def get_font_path(self, style):
+        return str(self.font_dir  / f'{self.base_font}-{style}.ttf')
+    
+    def draw_interface(self, reset_scroll=False):
+        if reset_scroll:
+            self.reset_station_name_scroll()
+
+        if self.state.visualiser_enabled:
+            if self.state.visualiser == "graphic_equaliser":
+                self.graphic_equaliser(self.state.signal, base_y=31, height=30)
+            elif self.state.visualiser == "waveform":
+                self.waveform(self.state.signal, base_y=31, height=30)
+
+        if self.state.levels_enabled:
+            self.levels(self.state.peak_l, self.state.peak_r) 
+        else:
+            self.clear_levels()       
+
+        clear_sn = not  self.state.visualiser_enabled
+        self.draw_station_name(self.state.station_name, clear=clear_sn)
+        self.draw_ensemble(self.state.ensemble, clear=True)
+        self.draw_volume_bar(self.state.volume, x=0,y=self.HEIGHT-30, height=2)   
+        self.update()
+
     def update(self):
         self.disp.display(self.img)
 
-    def clear_screen(self):
+    def clear_screen(self, draw_center_lines:bool=False):
         self.draw.rectangle((0, 0, self.WIDTH, self.HEIGHT), (0, 0, 0))
-        #self.draw.line((self.WIDTH//2,0,self.WIDTH//2,self.HEIGHT))
-        #self.draw.line((0,self.HEIGHT//2,self.WIDTH,self.HEIGHT//2))
+        if draw_center_lines:
+            self.draw.line((self.WIDTH//2,0,self.WIDTH//2,self.HEIGHT), fill='gray')
+            self.draw.line((0,self.HEIGHT//2,self.WIDTH,self.HEIGHT//2), fill='gray')
+
+    def show_startup(self):
+        self.clear_screen()
+        self.state.station_name = "Dabble Radio"
+        self.state.ensemble = "(c) digital-gangsters 2025"
+        self.draw_interface()
+
+    def clear_levels(self):
+        # Clear the top part of the screen
+        self.draw.rectangle((0,1,self.WIDTH,6), (0, 0, 0))
 
     def levels(self,l,r):
         c=self.WIDTH/2
-        lx1=c-(l/2)
-        lx2=c+(l/2)
-        rx1=c-(r/2)
-        rx2=c+(r/2)
+        lx1=c-l
+        lx2=c+l
+        rx1=c-r
+        rx2=c+r
         l_line_colour_rgb = tuple(int(c*255) for c in colorsys.hsv_to_rgb(l/10, 0.8, 0.9))
         r_line_colour_rgb = tuple(int(c*255) for c in colorsys.hsv_to_rgb(r/10, 0.8, 0.9))
-        #print(l,r,line_colour_rgb)
-        # (0, 180, 255)
-        self.draw.rectangle((0,1, self.WIDTH,6), (0, 0, 0))
+
+        self.clear_levels()
+
+        # Draw the levels
         self.draw.line((lx1,1,lx2,1),fill=l_line_colour_rgb, width=1)
         self.draw.line((rx1,6,rx2,6),fill=r_line_colour_rgb, width=1)
-        
-    def draw_ensemble(self, t:str):
-        (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
-        self.draw.rectangle((0,self.HEIGHT-(y2-y1)-12, self.WIDTH, self.HEIGHT), (0, 0, 0))
-        self.draw.text( (0,self.HEIGHT-2), t, font=self.ensemble_font, fill=(49, 117, 194),anchor="ld")
 
-    def draw_station_name(self, t:str):
+        if l>self.last_max_l_level:
+            self.last_max_l_level=l
+        if self.last_max_l_level>0:
+            self.draw.point((c+self.last_max_l_level,1),fill='white')
+            self.draw.point((c-self.last_max_l_level,1),fill='white')
+            self.last_max_l_level -= 2
+
+        if r>self.last_max_r_level:
+            self.last_max_r_level=r
+        if self.last_max_l_level>0:
+            self.draw.point((c+self.last_max_r_level,6),fill='white')
+            self.draw.point((c-self.last_max_r_level,6),fill='white')
+            self.last_max_r_level -= 2
+        
+        
+    def draw_ensemble(self, t:str, clear:bool=False):
+        (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
+        if clear:
+            self.draw.rectangle((0,self.HEIGHT-(y2-y1)-12, self.WIDTH, self.HEIGHT), (0, 0, 0))
+        self.draw.text( (0,self.HEIGHT-2), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
+
+    def draw_station_name(self, t:str, clear:bool=False):
         (x1,y1,x2,y2) = self.station_font.getbbox(t)
 
         # Center in x and y
@@ -73,29 +164,129 @@ class LCDUI():
         text_x = self.WIDTH - self.station_name_x
         text_y = self.CENTRE_HEIGHT - size_y
 
-        ## +12 is a fix for 
-        self.draw.rectangle((0,text_y, self.WIDTH, text_y + size_y + 12), (0, 0, 0))
-        self.draw.text( (text_x, self.CENTRE_HEIGHT), t, font=self.station_font, fill=(49, 117, 194), anchor="ls")
+        ## TODO: +12 is a fix and make it works. Not sure why. Poss text anchor
+        if clear:
+            self.draw.rectangle((0,text_y, self.WIDTH, text_y + size_y + 12), (0, 0, 0))
+        self.draw.text( 
+            (text_x, self.CENTRE_HEIGHT), 
+            t, 
+            font=self.station_font, 
+            fill=self.colours["station"], 
+            anchor="ls"
+        )
 
-    def scroll_station_name(self, speed=2):
+    def scroll_station_name(self, speed=3):
         self.station_name_x += speed
         # Rotate back 
         self.station_name_x %= (self.station_name_size_x + self.WIDTH)
 
-    def reset_scroll(self):
+    def reset_station_name_scroll(self):
         self.station_name_x = self.WIDTH
 
-    def draw_volume(self, vol):
+    def draw_volume_bar(self, volume, max_volume=100, width=160, height=4, x=0, y=0):
+            """
+            Draws a horizontal volume bar at position (x, y).
+            :param volume: Current volume (0-max_volume)
+            :param max_volume: Maximum volume value
+            :param width: Width of the bar
+            :param height: Height of the bar
+            :param x: X position on the screen
+            :param y: Y position on the screen
+            """
+            bar_margin = 2
+            bar_height = height // 2
+            bar_y = y + (height - bar_height) // 2
+
+            # Bar background
+            self.draw.rectangle([x + bar_margin, bar_y, x + width - bar_margin, bar_y + bar_height], self.colours['volume_bg'])
+
+            # Bar fill
+            fill_width = int((width - 2 * bar_margin) * (volume / max_volume))
+            self.draw.rectangle([x + bar_margin, bar_y, x + bar_margin + fill_width, bar_y + bar_height], fill=self.colours['volume'])
+            '''
+            text = f"{volume}/{max_volume}"
+            text_w = self.draw.textlength(text, font=self.vol_font)
+            bbox = self.vol_font.getbbox(text)
+            text_h = bbox[3] - bbox[1]
+            text_x = x + (width - text_w) // 2
+            text_y = bar_y + bar_height + 2
+            self.draw.text((text_x, text_y), text, fill=self.colours["volume"], font=self.vol_font)
+            '''
+
+    def scale_log(self, c, f):
+        return c * math.log(float(1 + f),10);
+
+    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=2):
         '''
-        Arc starts at 90 (0 pointing at top of screen)
-    
+        Show frequencies using fft
         '''
-        scaled_vol = int(vol * 3.6) # Now an angle
-        s=0
-        e=scaled_vol
-        print("vol",vol,scaled_vol,s,e)
-        x1=self.CENTRE_WIDTH-15
-        x2=self.CENTRE_WIDTH+15
-        y1=self.CENTRE_HEIGHT-15
-        y2=self.CENTRE_HEIGHT+15
-        self.draw.arc( [(x1,y1), (x2,y2)], start=s-90, end=e-90, fill=(50, 50, 50), width=5 )
+        if signal is None:
+            return
+        if width==0:
+            width=self.WIDTH
+
+        mono_signal = (signal[0::2] + signal[1::2]) / 2
+        fft_mag = np.abs(np.fft.rfft(mono_signal))
+        max_mag = np.max(fft_mag)
+        if max_mag==0:
+            return
+        
+        scale = height/max_mag
+        #c = max_mag/math.log(max_mag+1,10)/2;
+
+        self.draw.rectangle((0,self.HEIGHT-height-base_y,self.WIDTH,self.HEIGHT-base_y), fill="black")
+        end_range = len(fft_mag) - 1
+        step  = int(len(fft_mag)/width)
+        if step<=1:
+            step=2
+        #print(len(fft_mag), width, step)
+
+        for i in range(1, end_range, step):
+            #v = round(self.scale_log(c, fft_mag[i]));
+            #y1 = int(v * scale)
+            y1 = int(fft_mag[i] * scale)
+
+            self.draw.line( ( i, self.HEIGHT - base_y, i , self.HEIGHT - y1 - base_y), fill=self.colours['equaliser_line'])
+            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.colours['equaliser_dot'])
+
+            if y1 > self.last_max_signal[i]:
+                self.last_max_signal[i] = y1
+
+            if self.last_max_signal[i]>0:
+                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill='white')
+                self.last_max_signal[i] -= fall_decay
+
+
+    def waveform(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=4):
+        '''
+        Show waveform
+        '''
+        if signal is None:
+            return
+        if width==0:
+            width=self.WIDTH
+
+        mono_signal = np.abs((signal[0::2] + signal[1::2]) / 2)
+        max_mag = np.max(mono_signal)
+        if max_mag==0:
+            return
+        
+        step=int(len(mono_signal)/width)
+        end_range = len(mono_signal)-step
+        scale = height/max_mag
+        # Clear
+        self.draw.rectangle((0,self.HEIGHT-height-base_y,self.WIDTH,self.HEIGHT-base_y), fill="black")
+        # Draw waveform
+        for i in range(1,end_range,step):
+            y1 = int(mono_signal[i] * scale)
+            y2 = int(mono_signal[i+step] * scale)
+            self.draw.line( ( i, self.HEIGHT-y1-base_y, i+step , self.HEIGHT-y2-base_y), fill=self.colours['equaliser_dot'])
+            self.draw.line( ( i, self.HEIGHT-base_y, i , self.HEIGHT-y1-base_y), fill=self.colours['equaliser_line'])
+            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill='white')
+
+            if y1 > self.last_max_signal[i]:
+                self.last_max_signal[i] = y1
+
+            if self.last_max_signal[i]>0:
+                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill='white')
+                self.last_max_signal[i] -= fall_decay

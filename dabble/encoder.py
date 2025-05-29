@@ -31,3 +31,9 @@ class Encoder():
         self.ioe.output(self.PIN_GREEN, g)
         self.ioe.output(self.PIN_BLUE, b)
         return (r,g,b)
+
+    def set_colour_by_rgb(self, rgb:tuple):
+        r,g,b=rgb
+        self.ioe.output(self.PIN_RED, r)
+        self.ioe.output(self.PIN_GREEN, g)
+        self.ioe.output(self.PIN_BLUE, b)
