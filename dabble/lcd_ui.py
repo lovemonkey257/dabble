@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 from PIL import Image, ImageDraw, ImageFont
 import st7735
@@ -6,26 +6,45 @@ from pathlib import Path
 import colorsys
 import numpy as np
 import math
+from enum import StrEnum
+
+class GraphicState(StrEnum):
+    WAVEFORM="waveform"
+    GRAPHIC_EQUALISER="graphic_equaliser"
 
 @dataclass
 class UIState():
-    station_name: str = ""
-    ensemble: str = ""
-    volume: int = 40
-    peak_l: int = 0
-    peak_r: int = 0
-    signal: np.ndarray = None
+    station_name:str     = ""
+    ensemble:str         = ""
+    last_pad_message:str = ""
+    volume:int           = 40
+    peak_l:int           = 0
+    peak_r:int           = 0
+    signal:np.ndarray    = None
+    levels_enabled:bool  =  True
+    dab_type:str         = ""
+    current_msg:int      = 0 # 0=Station, 1=Last PAD
     pulse_left_led_encoder:bool = False
-    left_led_rgb = (255,255,255)
+    left_led_rgb         = (255,255,255)
     pulse_right_led_encoder:bool = False
-    right_led_rgb = (255,255,255)
-    visualiser_enabled:bool =  False
-    visualiser:str = "graphic_equaliser" # Or "waveform"
-    levels_enabled:bool =  True
+    right_led_rgb        = (255,255,255)
+    visualiser_enabled:bool = True
+    visualiser:GraphicState = GraphicState.GRAPHIC_EQUALISER
+
+    def get_pad_message(self):
+        return self.last_pad_message if self.last_pad_message else ""
+    
+    def get_current_message(self):
+            return self.station_name if self.current_msg==0 else self.get_pad_message()
+
+    def get_next_message(self):
+        self.current_msg+=1
+        if self.current_msg > 1:
+            self.current_msg=0
 
 class LCDUI():
    
-    def __init__(self, station_font_size=20, ensemble_font_size=13):
+    def __init__(self, station_font_size=19, ensemble_font_size=13):
         # Create ST7735 LCD display class.
         self.disp = st7735.ST7735(
             port=0,
@@ -50,7 +69,7 @@ class LCDUI():
         self.font_dir=Path("/usr/share/fonts/truetype/")
         self.base_font = "liberation/LiberationSans"  # "quickstand/Quicksand"
 
-        self.station_font_file  = self.get_font_path("Regular")  # Regualr # str(self.font_dir  / "/quicksand/Quicksand-Bold.ttf")
+        self.station_font_file  = self.get_font_path("Regular") # Regular # str(self.font_dir  / "/quicksand/Quicksand-Bold.ttf")
         self.ensemble_font_file = self.get_font_path("Regular") # Light # str(self.font_dir / "/quicksand/Quicksand-Light.ttf")
 
         self.station_font = ImageFont.truetype(self.station_font_file, station_font_size)
@@ -80,14 +99,17 @@ class LCDUI():
         return str(self.font_dir  / f'{self.base_font}-{style}.ttf')
     
     def draw_interface(self, reset_scroll=False):
+        '''
+        Draw the entire interface
+        '''
         if reset_scroll:
             self.reset_station_name_scroll()
 
         if self.state.visualiser_enabled:
-            if self.state.visualiser == "graphic_equaliser":
-                self.graphic_equaliser(self.state.signal, base_y=31, height=30)
-            elif self.state.visualiser == "waveform":
-                self.waveform(self.state.signal, base_y=31, height=30)
+            if self.state.visualiser == GraphicState.GRAPHIC_EQUALISER:
+                self.graphic_equaliser(self.state.signal, base_y=31, height=35)
+            elif self.state.visualiser == GraphicState.WAVEFORM:
+                self.waveform(self.state.signal, base_y=31, height=35)
 
         if self.state.levels_enabled:
             self.levels(self.state.peak_l, self.state.peak_r) 
@@ -95,8 +117,10 @@ class LCDUI():
             self.clear_levels()       
 
         clear_sn = not  self.state.visualiser_enabled
-        self.draw_station_name(self.state.station_name, clear=clear_sn)
+        # self.draw_station_name(self.state.station_name, clear=clear_sn)
+        self.draw_station_name(self.state.get_current_message(), clear=clear_sn)
         self.draw_ensemble(self.state.ensemble, clear=True)
+        self.draw_dab_type(self.state.dab_type, clear=True)
         self.draw_volume_bar(self.state.volume, x=0,y=self.HEIGHT-30, height=2)   
         self.update()
 
@@ -111,9 +135,9 @@ class LCDUI():
 
     def show_startup(self):
         self.clear_screen()
-        self.state.station_name = "Dabble Radio"
-        self.state.ensemble = "(c) digital-gangsters 2025"
-        self.draw_interface()
+        self.draw_station_name("Dabble Radio")
+        self.draw_ensemble("(c) digital-gangsters 2025")
+        self.update()
 
     def clear_levels(self):
         # Clear the top part of the screen
@@ -151,15 +175,24 @@ class LCDUI():
         
     def draw_ensemble(self, t:str, clear:bool=False):
         (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
+        text_w = self.WIDTH//2
         if clear:
-            self.draw.rectangle((0,self.HEIGHT-(y2-y1)-12, self.WIDTH, self.HEIGHT), (0, 0, 0))
+            self.draw.rectangle((0,self.HEIGHT-(y2-y1)-12, text_w, self.HEIGHT), (0, 0, 0))
         self.draw.text( (0,self.HEIGHT-2), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
+
+    def draw_dab_type(self, t:str, clear:bool=False):
+        (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
+        text_w = self.draw.textlength(t, font=self.ensemble_font)
+        if clear:
+            self.draw.rectangle((self.WIDTH//2,self.HEIGHT-(y2-y1)-12, self.WIDTH, self.HEIGHT), (0, 0, 0))
+        self.draw.text( (self.WIDTH-text_w,self.HEIGHT-2), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
 
     def draw_station_name(self, t:str, clear:bool=False):
         (x1,y1,x2,y2) = self.station_font.getbbox(t)
 
         # Center in x and y
-        self.station_name_size_x = x2 - x1
+        #self.station_name_size_x = x2 - x1
+        self.station_name_size_x = self.draw.textlength(t, font=self.station_font)
         size_y = y2 - y1
         text_x = self.WIDTH - self.station_name_x
         text_y = self.CENTRE_HEIGHT - size_y
@@ -167,23 +200,22 @@ class LCDUI():
         ## TODO: +12 is a fix and make it works. Not sure why. Poss text anchor
         if clear:
             self.draw.rectangle((0,text_y, self.WIDTH, text_y + size_y + 12), (0, 0, 0))
-        self.draw.text( 
-            (text_x, self.CENTRE_HEIGHT), 
-            t, 
-            font=self.station_font, 
-            fill=self.colours["station"], 
-            anchor="ls"
-        )
+        self.draw.text( (text_x, self.CENTRE_HEIGHT), t, font=self.station_font, fill=self.colours["station"], anchor="ls")
 
     def scroll_station_name(self, speed=3):
-        self.station_name_x += speed
+        self.station_name_x += int(speed)
+
         # Rotate back 
-        self.station_name_x %= (self.station_name_size_x + self.WIDTH)
+        if self.station_name_x>= self.station_name_size_x + self.WIDTH:
+            self.station_name_x = 0
+            self.state.get_next_message()
+        #self.station_name_x %= int((self.station_name_size_x + self.WIDTH))
+
 
     def reset_station_name_scroll(self):
         self.station_name_x = self.WIDTH
 
-    def draw_volume_bar(self, volume, max_volume=100, width=160, height=4, x=0, y=0):
+    def draw_volume_bar(self, volume, max_volume=100, width=160, height=4, x=0, y=0, bar_margin=0):
             """
             Draws a horizontal volume bar at position (x, y).
             :param volume: Current volume (0-max_volume)
@@ -193,7 +225,6 @@ class LCDUI():
             :param x: X position on the screen
             :param y: Y position on the screen
             """
-            bar_margin = 2
             bar_height = height // 2
             bar_y = y + (height - bar_height) // 2
 
@@ -216,7 +247,7 @@ class LCDUI():
     def scale_log(self, c, f):
         return c * math.log(float(1 + f),10);
 
-    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=2):
+    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=2, use_log_scale:bool=False):
         '''
         Show frequencies using fft
         '''
@@ -225,26 +256,37 @@ class LCDUI():
         if width==0:
             width=self.WIDTH
 
+        # Convert to mono (average l/r channels)
         mono_signal = (signal[0::2] + signal[1::2]) / 2
+
+        # FFT magic
         fft_mag = np.abs(np.fft.rfft(mono_signal))
         max_mag = np.max(fft_mag)
         if max_mag==0:
             return
-        
+       
+        # Calc scale
         scale = height/max_mag
-        #c = max_mag/math.log(max_mag+1,10)/2;
+        if use_log_scale:
+            c = max_mag/math.log(max_mag+1,10)/2;
 
-        self.draw.rectangle((0,self.HEIGHT-height-base_y,self.WIDTH,self.HEIGHT-base_y), fill="black")
+        # Scale steps
         end_range = len(fft_mag) - 1
         step  = int(len(fft_mag)/width)
+        # If too small enforce step size
         if step<=1:
             step=2
-        #print(len(fft_mag), width, step)
 
+        # Clear
+        self.draw.rectangle((0,self.HEIGHT-height-base_y,self.WIDTH,self.HEIGHT-base_y), fill="black")
+
+        y1=0
         for i in range(1, end_range, step):
-            #v = round(self.scale_log(c, fft_mag[i]));
-            #y1 = int(v * scale)
-            y1 = int(fft_mag[i] * scale)
+            if use_log_scale:
+                v = round(self.scale_log(c, fft_mag[i]));
+                y1 = int(v * scale)
+            else:
+                y1 = int(fft_mag[i] * scale)
 
             self.draw.line( ( i, self.HEIGHT - base_y, i , self.HEIGHT - y1 - base_y), fill=self.colours['equaliser_line'])
             self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.colours['equaliser_dot'])
@@ -270,12 +312,15 @@ class LCDUI():
         max_mag = np.max(mono_signal)
         if max_mag==0:
             return
-        
+       
+        # Calc scale
         step=int(len(mono_signal)/width)
         end_range = len(mono_signal)-step
         scale = height/max_mag
+
         # Clear
         self.draw.rectangle((0,self.HEIGHT-height-base_y,self.WIDTH,self.HEIGHT-base_y), fill="black")
+
         # Draw waveform
         for i in range(1,end_range,step):
             y1 = int(mono_signal[i] * scale)
