@@ -1,10 +1,14 @@
 import logging
 import time
+import re
 import subprocess
+import threading
+from queue import Queue,Empty
+from io import StringIO
 import shlex
 import json
 import signal
-import sys
+import sys 
 from string import Template
 from pathlib import Path
 
@@ -21,7 +25,8 @@ class RadioPlayer():
         self.multiplexes = list()
         # signal.signal(signal.SIGINT, self.signal_handler)
 
-        self.play_cmdline=Template('/usr/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I')
+        # self.play_cmdline=Template('/usr/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I')
+        self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I')
         self.scan_cmdline=Template('/usr/local/bin/eti-cmdline-rtlsdr -J -x -C $block -D $scantime')
 
     def signal_handler(self, sig, frame):
@@ -29,6 +34,11 @@ class RadioPlayer():
         self.stop()
         time.sleep(1)
         sys.exit(0)
+
+    def _read_stream(self, stream, queue:Queue):
+        for line in iter(stream.readline, b''):
+            queue.put(line.decode().replace("\n",""))
+        stream.close()
 
     def play(self,name):
         self.playing = name
@@ -39,14 +49,52 @@ class RadioPlayer():
                     "channel":self.channel,
                     "sid": self.sid
                 })
-            )
+            ),
+            stderr=subprocess.PIPE
         )
+        self.dablin_stderr_lookups = {
+            "dab_type":  re.compile(f"FICDecoder: SId {self.sid}: audio service \(SubChId \d+, (?P<v>.*), primary\)", re.IGNORECASE),
+            "prog_type": re.compile(f"^FICDecoder: SId {self.sid}: programme type \(static\): '(?P<v>.*)'", re.IGNORECASE),
+            "pad_label": re.compile(f"^PADChangeDynamicLabel SId {self.sid} Label:'(?P<v>.+)'", re.IGNORECASE),
+            "media_fmt": re.compile(f"^EnsemblePlayer: format: (?P<v>.*)", re.IGNORECASE)
+        }
+        self.dablin_stderr_q = Queue()
+        self._t=threading.Thread(target=self._read_stream, args=(self.dablin_proc.stderr, self.dablin_stderr_q))
+        self._t.daemon = True
+        self._t.start()
 
     def stop(self):
         self.currently_playing = None
         if self.dablin_proc is not None:
             self.dablin_proc.terminate()
         time.sleep(1)
+
+    def _get_line_from_q(self):
+            s=""
+            for c in self.dablin_stderr_q.get_nowait():
+                s+=c
+                if c=="\n":
+                    break
+            return s
+    
+    def parse_dablin_output(self):
+        '''
+        FICDecoder: SId 0xC4CD: audio service (SubChId 17, DAB+, primary)
+        FICDecoder: SId 0xC4CD: programme type (static): 'Rock Music'
+        FICDecoder: SId 0xC4CD, SCIdS  0: MSC service component (SubChId 17)
+        FICDecoder: SId 0xC4CD: programme service label 'Radio X' ('Radio X')
+        PADChangeDynamicLabel SId 0xC4CD Label:'Radio X - Get Into the Music'
+        PADChangeDynamicLabel SId 0xC4CD Label:'On Air Now on Radio X: Dan Gasser'        
+        '''
+        try:
+            l=self._get_line_from_q()
+            for lu in self.dablin_stderr_lookups:
+                r=self.dablin_stderr_lookups[lu].search(l)
+                if r:
+                    return { lu : r.groupdict()['v'] }
+        except Empty:
+            pass
+        return None
 
     def load_multiplexes(self):
         if Path("multiplex.json").exists():
@@ -101,18 +149,6 @@ class RadioPlayer():
         if ui_msg_callback is not None:
             ui_msg_callback(f'Storing Data')
 
-        '''
-        ensembles=Path(".")
-        for ensemble_json_file in list(ensembles.glob('ensemble-ch-*.json')):
-            with open(ensemble_json_file, 'r') as jfile:
-                data = json.load(jfile)
-                for s,sid in data['stations'].items():
-                    if s not in stations:
-                        stations[s]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }
-                    else:
-                        stations[s + " " + data['ensemble'] ]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }
-        '''
-
         with open("station-list.json","w") as s:
             json.dump(stations,s)
 
@@ -120,10 +156,7 @@ class RadioPlayer():
 
         if ui_msg_callback is not None:
             ui_msg_callback(f'Found {self.radio_stations.total_stations} stations')
-
-       
     
-
 
 """
 #! /bin/bash
