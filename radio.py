@@ -114,13 +114,10 @@ left_encoder_start_rotate_time=0 # time.time()
 # True if we are to change channel (after twiddling)
 changing_station=False
 scroll_station_name=False
-
 new_station_name="?"
 new_ensemble="?"
-
 left_encoder_value=0
 mode=EncoderState.CHANGE_STATION
-
 last_left_encoder_value = 0
 
 audio.set_volume(ui.state.volume)
@@ -129,12 +126,20 @@ logger.info(f'Volume set to {audio.volume}')
 logger.info("Radio main loop starting")
 try:
     while True:
+        # TODO: Needs to be earlier?
+        if audio.stream.is_active():
+            (ui.state.peak_l, ui.state.peak_r) = audio.get_peaks()
+            ui.state.signal = audio.signal
+
         k = kb.get_key()
         if k=="v":
+            logging.info("Volume mode")
             mode=EncoderState.CHANGE_VOLUME
         elif k=="s":
+            logging.info("Station mode")
             mode=EncoderState.CHANGE_STATION
         elif k=="S":
+            logging.info("Scanning initiated")
             mode=EncoderState.SCANNING
         elif k=="V":
             logging.info("Toggling visualiser")
@@ -143,11 +148,13 @@ try:
             logging.info("Toggling levels")
             ui.state.levels_enabled = not ui.state.levels_enabled
         elif k=="w":
-            logging.info("Waveform graphic selected")
-            ui.state.visualiser = "waveform"
+            ui.state.visualiser_enabled = True
+            ui.state.visualiser = lcd_ui.GraphicState.WAVEFORM
+            logging.info("Waveform graphic selected: %s", ui.state.visualiser)
         elif k=="g":
-            logging.info("Graphic equaliser graphic selected")
-            ui.state.visualiser = "graphic_equaliser"
+            ui.state.visualiser_enabled = True
+            ui.state.visualiser = lcd_ui.GraphicState.GRAPHIC_EQUALISER
+            logging.info("Graphic Equaliser graphic selected: %s", ui.state.visualiser)
 
         if left_encoder.ioe.get_interrupt():
             left_encoder_value = left_encoder.ioe.read_rotary_encoder(1)
@@ -172,6 +179,7 @@ try:
                 new_ensemble = new_station_details['ensemble']
                 ui.state.station_name = new_station_name
                 ui.state.ensemble = new_ensemble
+                ui.state.current_msg = 0
                 logger.info(f'New station {new_station_name} {new_ensemble} selected')
                 ui.reset_station_name_scroll()
 
@@ -191,11 +199,14 @@ try:
         # scroll text once stopped twiddling know and changed channel?
         left_encoder_stopped_twiddling = time.time() - left_encoder_start_rotate_time > 2
 
+        # Change station!
         if left_encoder_stopped_twiddling and changing_station:
             player.stop()
-            ui.state.station_name = "Retuning.."
-            ui.draw_interface(reset_scroll=True)
             player.play(new_station_name)
+            ui.state.station_name = new_station_name
+            ui.state.dab_type = ""
+            ui.state.last_pad_message = ""
+            ui.draw_interface(reset_scroll=True)
             logger.info(f'Now playing {new_station_name}')
             time.sleep(0.9)
             changing_station=False
@@ -206,9 +217,6 @@ try:
                 ui.state.station_name = player.playing
                 ui.state.ensemble = player.ensemble
 
-            if audio.stream.is_active():
-                (ui.state.peak_l, ui.state.peak_r) = audio.get_peaks()
-                ui.state.signal = audio.signal
 
         ui.draw_interface()
         ## and .... breathe
@@ -220,6 +228,18 @@ try:
         
         last_left_encoder_value = left_encoder_value
 
+        updates = player.parse_dablin_output()
+        if updates:
+            if "dab_type" in updates:
+                ui.state.dab_type=updates['dab_type']
+                logger.info(f"Got DAB type: {ui.state.dab_type}")
+            elif "pad_label" in updates:
+                logger.info(f"Got PAD msg: \"{updates['pad_label']}\"")
+                ui.state.last_pad_message = updates['pad_label']
+            elif "media_fmt" in updates:
+                logger.info(f"Audio format: \"{updates['media_fmt']}\"")
+
+    
 
 except (KeyboardInterrupt,SystemExit):
     save_state(ui.state)
