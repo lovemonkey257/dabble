@@ -2,35 +2,42 @@
 A DAB radio project based on a PI, small LCD and some LED encoders. Very much a work in progress.
 
 ## Current progress
-- Moved to modules
-- Currently using single encoder so using key presses to simulate other functions
-- UI much improved. Three visualisers: FFT, Waveform and Levels
-- Scanning works
+- Forked and fixed dablin cli to output PAD announcements e.g. now playing
+- UI seems stable
 
 ## Current problems:
 - Need another encoder as UI is difficult otherwise
+- Will need a menu system (using encoders) to nav settings etc
 - Need to decide on audio output e.g. DAC or ??
-- Some UI artifacts which may indicate timing issues?
 - Proper build perhaps into containers
-- Need to refactor dablin so it publishes service labels and updates e.g. now playing. The GTK version version does this. 
-- How does dablin/eti-cmdline communiate with other components? MQTT, D-BUS?
+
+## Ideas
+- Want to stream to airplay/chromecast?? 
+- Turn this into a mini streamer e.g. run shareport-sync et al?
 
 ## Components
 - PI3 or greater. I'm currently using a PI5 which is probably overkill. Will probably try a Pi Zero W.
 - [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
-- 2 x [LED encoders](https://shop.pimoroni.com/products/rgb-encoder-breakout) although I may change these to ones that include a button. But LEDS....
-- RTLSDR (a cheap one will probably do, I'm using an official RTL-SDR.com v3)
-- No idea about an enclosure yet. Probably have to 3D print or make out of wood? Will get the basic electronics and code working first.
+- 1 x [LED encoders](https://shop.pimoroni.com/products/rgb-encoder-breakout) although I may change these to ones that include a button. But LEDS.... But switch!! Shame LED ones don't have a switch.
+- RTLSDR (a cheap one will probably do, I'm using an official RTL-SDR.com v3). Move to Nano RTLSDR
+- No idea about an enclosure yet. Will prototype it in thin MDF
 
 ## Software
-- Custom code
-- Modififed version of of eti-cmdline from JvanKatwijk. Forked here https://github.com/lovemonkey257/eti-stuff
-- dablin, https://github.com/Opendigitalradio/dablin
+- UI and controller written in python
+- Modified version of of eti-cmdline from JvanKatwijk. Forked here https://github.com/lovemonkey257/eti-stuff
+- Modified version of dablin from Opendigialradio, https://github.com/lovemonkey257/dablin
 
 ## Build
 
 ### `dablin`
-- `sudo apt install dablin`
+- `sudo apt remove dablin`
+- `git clone https://github.com/lovemonkey257/dablin.git`
+- `cd dablin`
+- `mkdir build && cd build && cmake ..`
+- `make && sudo make install`
+Note that dablin will be installed in /usr/local/bin/. System installed
+version is in /usr/bin. Check you've removed system version if you have
+problems with PAD.
 
 ### `eti-cmdline`
 - `git clone https://github.com/lovemonkey257/eti-stuff.git`
@@ -49,3 +56,18 @@ This should put `eti-cmdline-rtlsdr` into `/usr/local/bin`
 
 ## Config
 TODO
+
+## Running
+- cd into your dev dir
+- `source ./venv/bin/activate`
+- `python radio.py`
+
+## Use
+To simulate multiple encoders I'm using keypresses. For examplei:
+
+- Volume: press `v` then encoder changes volume
+- Stations: press `s` then encoder steps through stations
+- Scanning: press `S`
+- Change visualiser: Press `g` for graphic equaliser, `w` for waveform
+
+
