@@ -29,17 +29,35 @@ A DAB radio project based on a PI, small LCD and some LED encoders. Very much a 
 
 ## Build
 
+Ensure Raspberry Pi has SPI and I2C enabled in config
+
+```
+sudo raspi-config nonint do_spi 1
+sudo raspi-config nonint do_i2c 1
+sudo reboot
+```
+
 ### `dablin`
+
+Dependencies first.
+- `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libgtkmm-3.0-dev libfdk-aac-dev
+
+Now the code:
 - `sudo apt remove dablin`
 - `git clone https://github.com/lovemonkey257/dablin.git`
 - `cd dablin`
 - `mkdir build && cd build && cmake ..`
 - `make && sudo make install`
+
 Note that dablin will be installed in /usr/local/bin/. System installed
 version is in /usr/bin. Check you've removed system version if you have
 problems with PAD.
 
 ### `eti-cmdline`
+Dependencies:
+- `sudo apt install build-essential cmake libfftw3f-dev libfftw3f libsamplerate0-dev librtlsdr-dev libspdlog-dev nlohmann-json3-dev libboost libboost-dev libfmt-dev libfmt9 jq`
+
+Code:
 - `git clone https://github.com/lovemonkey257/eti-stuff.git`
 - `cd eti-stuff\eti-cmdline`
 - `mkdir build && cd build`
@@ -49,7 +67,7 @@ problems with PAD.
 This should put `eti-cmdline-rtlsdr` into `/usr/local/bin`
 
 ### Python
-- `sudo apt install python3-alsaaudio`
+- `sudo apt install python3-alsaaudio python3-pyaudio`
 - Create venv `pip -mvenv venv`
 - Edit ./venv/pyvenv.cfg and ensure `include-system-site-packages` is `true`
 - `pip install -r requirements.txt`
