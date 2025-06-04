@@ -116,7 +116,7 @@ class LCDUI():
         else:
             self.clear_levels()       
 
-        clear_sn = not  self.state.visualiser_enabled
+        clear_sn = not self.state.visualiser_enabled
         # self.draw_station_name(self.state.station_name, clear=clear_sn)
         self.draw_station_name(self.state.get_current_message(), clear=clear_sn)
         self.draw_ensemble(self.state.ensemble, clear=True)
@@ -184,7 +184,7 @@ class LCDUI():
         (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
         text_w = self.draw.textlength(t, font=self.ensemble_font)
         if clear:
-            self.draw.rectangle((self.WIDTH//2,self.HEIGHT-(y2-y1)-12, self.WIDTH, self.HEIGHT), (0, 0, 0))
+            self.draw.rectangle((self.WIDTH//2,self.HEIGHT-(y2-y1)-14, self.WIDTH, self.HEIGHT), (0, 0, 0))
         self.draw.text( (self.WIDTH-text_w,self.HEIGHT-2), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
 
     def draw_station_name(self, t:str, clear:bool=False):
@@ -193,7 +193,7 @@ class LCDUI():
         # Center in x and y
         #self.station_name_size_x = x2 - x1
         self.station_name_size_x = self.draw.textlength(t, font=self.station_font)
-        size_y = y2 - y1
+        size_y = y2 - y1 + 12
         text_x = self.WIDTH - self.station_name_x
         text_y = self.CENTRE_HEIGHT - size_y
 
