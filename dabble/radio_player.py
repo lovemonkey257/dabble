@@ -13,6 +13,7 @@ from string import Template
 from pathlib import Path
 
 from . import radio_stations
+logger = logging.getLogger(__name__)
 
 class RadioPlayer():
     def __init__(self, radio_stations:radio_stations.RadioStations=None):
@@ -41,6 +42,8 @@ class RadioPlayer():
         stream.close()
 
     def play(self,name):
+        logger.info("Player starting")
+        self._recv_errors=0
         self.playing = name
         (self.channel,self.sid,self.ensemble) = self.radio_stations.tuning_details(name)
         self.dablin_proc=subprocess.Popen(
@@ -52,8 +55,18 @@ class RadioPlayer():
             ),
             stderr=subprocess.PIPE
         )
+        '''
+        FICDecoder: SId 0xCFE8: audio service (SubChId  4, DAB+, primary)
+        FICDecoder: SId 0xC4CD: audio service (SubChId 17, DAB+, primary)
+        EnsemblePlayer: playing sub-channel 4 (DAB+)
+        FICDecoder: SId 0xC4CD: programme type (static): 'Rock Music'
+        FICDecoder: SId 0xC4CD, SCIdS  0: MSC service component (SubChId 17)
+        FICDecoder: SId 0xC4CD: programme service label 'Radio X' ('Radio X')
+        PADChangeDynamicLabel SId 0xC4CD Label:'Radio X - Get Into the Music'
+        PADChangeDynamicLabel SId 0xC4CD Label:'On Air Now on Radio X: Dan Gasser'        
+        '''
         self.dablin_stderr_lookups = {
-            "dab_type":  re.compile(f"FICDecoder: SId {self.sid}: audio service \(SubChId \d+, (?P<v>.*), primary\)", re.IGNORECASE),
+            "dab_type":  re.compile(f"FICDecoder: SId {self.sid}: audio service \(SubChId\s+\d+, (?P<v>.*), primary\)", re.IGNORECASE),
             "prog_type": re.compile(f"^FICDecoder: SId {self.sid}: programme type \(static\): '(?P<v>.*)'", re.IGNORECASE),
             "pad_label": re.compile(f"^PADChangeDynamicLabel SId {self.sid} Label:'(?P<v>.+)'", re.IGNORECASE),
             "media_fmt": re.compile(f"^EnsemblePlayer: format: (?P<v>.*)", re.IGNORECASE)
@@ -71,21 +84,20 @@ class RadioPlayer():
 
     def _get_line_from_q(self):
             s=""
+            recd=0
             for c in self.dablin_stderr_q.get_nowait():
                 s+=c
-                if c=="\n":
+                recd+=1
+                if c=="\n" or recd>200:
                     break
+            if recd>200:
+                self._recv_errors+=1
+                logger.error("Buffer overflowed. Possible reception errors")
+                logger.error("%s",s)
+
             return s
     
     def parse_dablin_output(self):
-        '''
-        FICDecoder: SId 0xC4CD: audio service (SubChId 17, DAB+, primary)
-        FICDecoder: SId 0xC4CD: programme type (static): 'Rock Music'
-        FICDecoder: SId 0xC4CD, SCIdS  0: MSC service component (SubChId 17)
-        FICDecoder: SId 0xC4CD: programme service label 'Radio X' ('Radio X')
-        PADChangeDynamicLabel SId 0xC4CD Label:'Radio X - Get Into the Music'
-        PADChangeDynamicLabel SId 0xC4CD Label:'On Air Now on Radio X: Dan Gasser'        
-        '''
         try:
             l=self._get_line_from_q()
             for lu in self.dablin_stderr_lookups:
@@ -157,33 +169,3 @@ class RadioPlayer():
         if ui_msg_callback is not None:
             ui_msg_callback(f'Found {self.radio_stations.total_stations} stations')
     
-
-"""
-#! /bin/bash
-# https://www.radiodns.uk/multiplexes.json
-#
-#
-
-curl https://www.radiodns.uk/multiplexes.json > multiplexes.json
-if [ -s multiplexes.json ]; then
-	echo "Getting DAB block info from www.radiodns.uk..."
-	blocks=$(jq -r ".[].block" multiplexes.json | sort -r | uniq)
-else
-	echo "Using default block settings. May be incomplete"
-	blocks=$(jq -r ".uk[]" default-multiplexes.json | sort -r | uniq)
-fi
-for block in $blocks
-do
-    echo "--------------------------------"
-    echo "Scanning $block"
-    echo "--------------------------------"
-    eti-cmdline-rtlsdr -J -x -C $block -D 10
-done
-echo "Compiling station list..."
-python stations.py
-echo "Station list in station-list.json"
-num_stations=$(jq "keys[]" station-list.json | wc -l)
-echo "Found $num_stations"
-echo "Have fun"
-
-"""
