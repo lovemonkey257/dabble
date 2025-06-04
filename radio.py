@@ -73,7 +73,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 logger.info("Radio initialising")
 kb = keyboard.Keyboard()
@@ -86,10 +86,15 @@ ui.show_startup()
 # Initialise stations and player
 logger.info("Loading radio stations")
 stations=radio_stations.RadioStations()
-## TODO: If no stations then force scan?
 
 logger.info("Initialising player")
 player=radio_player.RadioPlayer(radio_stations=stations)
+
+## TODO: If no stations then force scan?
+try:
+    stations.load_stations()
+except:
+    player.scan(ui_msg_callback=update_msg)
 
 # Load defaults
 logger.info("Loading defaults")
@@ -220,7 +225,7 @@ try:
 
         ui.draw_interface()
         ## and .... breathe
-        #time.sleep(0.005)
+        time.sleep(0.005)
 
         if ui.state.pulse_left_led_encoder:
             knob_colour = (ui.state.peak_l + ui.state.peak_r) / 2 
@@ -228,6 +233,7 @@ try:
         
         last_left_encoder_value = left_encoder_value
 
+        ## TODO: This is a problem!!! If takes too long loop hangs!
         updates = player.parse_dablin_output()
         if updates:
             if "dab_type" in updates:
@@ -238,6 +244,8 @@ try:
                 ui.state.last_pad_message = updates['pad_label']
             elif "media_fmt" in updates:
                 logger.info(f"Audio format: \"{updates['media_fmt']}\"")
+            elif "prog_type" in updates:
+                logger.info(f"Genre: \"{updates['prog_type']}\"")
 
     
 
