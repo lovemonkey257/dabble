@@ -17,6 +17,8 @@ class UIState():
     station_name:str     = ""
     ensemble:str         = ""
     last_pad_message:str = ""
+    audio_format:str     = ""
+    genre:str            = ""
     volume:int           = 40
     peak_l:int           = 0
     peak_r:int           = 0
