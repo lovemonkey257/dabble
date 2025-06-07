@@ -2,7 +2,7 @@ import logging
 import time
 import re
 import subprocess
-import threading
+from threading import Thread, Event, Lock
 from queue import Queue,Empty
 from io import StringIO
 import shlex
@@ -11,9 +11,113 @@ import signal
 import sys 
 from string import Template
 from pathlib import Path
+from copy import copy
+from dataclasses import dataclass, field
 
 from . import radio_stations
 logger = logging.getLogger(__name__)
+
+@dataclass
+class UpdateState():
+    name:str = ""
+    value:str = ""
+    updated:bool = False
+    empty:bool = True
+
+class MsgUpdates():
+    def __init__(self, lookups):
+        self._keys = lookups.keys()
+        self._values = dict()
+        for k in self._keys:
+            self._values[k]=UpdateState()
+
+    def __contains__(self, k):
+        return k in self._values
+
+    def get(self,k):
+        if k in self._values:
+            self._values[k].updated = False
+            return self._values[k]
+        return None
+
+    def update(self,k,v):
+        if k in self._values:
+            existing_v = self._values[k].value
+            if existing_v != v:
+                self._values[k].value=v
+                self._values[k].updated=True
+                return True
+            else:
+                self._values[k].updated=False
+        return False
+    
+    def is_updated(self,k):
+        if k in self._values:
+            return self._values[k].updated
+              
+class DablinLogParser():
+    def __init__(self, q:Queue, e:Event):
+        self._q = q
+        self._end_task = e
+        self._lookups = dict()
+        self._updates_lock = Lock()
+
+    def _get_line_from_q(self, recd_threshold:int=200):
+            s=""
+            recd=0
+            # Q returns characters not lines!!
+            for c in self._q.get_nowait():
+                s+=c
+                recd+=1
+                if c=="\n" or recd>recd_threshold:
+                    break
+            if recd>recd_threshold:
+                self._recv_errors+=1
+                logger.error("Buffer overflowed. Possible reception errors")
+                logger.error("%s",s)
+            logger.debug("Line read from q: %s", s)
+            return s
+    
+    def _parse_dablin_output(self):
+        '''
+        Parse the dablin log and run regexs to extract info such as
+        PAD announcements, DAB type etc. See play method for more
+        details.
+        '''
+        try:
+            l=self._get_line_from_q()
+            for lu in self._lookups:
+                r=self._lookups[lu].search(l)
+                if r:
+                    return ( lu, r.groupdict()['v'] )
+        except Empty:
+            pass
+        return (None, None)
+
+    def stop(self):
+        self._end_task.set()
+
+    def run(self, lookups:dict):
+        logger.info(f'Log reader starts')
+        self._lookups = lookups
+        self._updates = MsgUpdates(self._lookups)
+        try:
+            while True:
+                if self._end_task.is_set():
+                    break
+                with self._updates_lock:
+                    #self._updates = self._parse_dablin_output()
+                    k,v = self._parse_dablin_output()
+                    if k is not None:
+                        self._updates.update(k,v)
+                time.sleep(0.1)
+        except KeyboardInterrupt as e:
+            pass
+        return
+
+    def updates(self):
+        with self._updates_lock:
+            return copy(self._updates)
 
 class RadioPlayer():
     def __init__(self, radio_stations:radio_stations.RadioStations=None):
@@ -26,7 +130,6 @@ class RadioPlayer():
         self.multiplexes = list()
         # signal.signal(signal.SIGINT, self.signal_handler)
 
-        # self.play_cmdline=Template('/usr/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I')
         self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I')
         self.scan_cmdline=Template('/usr/local/bin/eti-cmdline-rtlsdr -J -x -C $block -D $scantime')
 
@@ -43,9 +146,17 @@ class RadioPlayer():
 
     def play(self,name):
         logger.info("Player starting")
+
+        self.dablin_stderr_q = Queue()
+        self._stop_log_parser_event = Event()
+        self.dablin_log_parser = DablinLogParser(self.dablin_stderr_q,  self._stop_log_parser_event)
+
         self._recv_errors=0
         self.playing = name
+
         (self.channel,self.sid,self.ensemble) = self.radio_stations.tuning_details(name)
+        # This is run in parallel so will not block
+        # Sound sent straight to sound card
         self.dablin_proc=subprocess.Popen(
             shlex.split(
                 self.play_cmdline.substitute({
@@ -71,33 +182,47 @@ class RadioPlayer():
             "pad_label": re.compile(f"^PADChangeDynamicLabel SId {self.sid} Label:'(?P<v>.+)'", re.IGNORECASE),
             "media_fmt": re.compile(f"^EnsemblePlayer: format: (?P<v>.*)", re.IGNORECASE)
         }
-        self.dablin_stderr_q = Queue()
-        self._t=threading.Thread(target=self._read_stream, args=(self.dablin_proc.stderr, self.dablin_stderr_q))
-        self._t.daemon = True
-        self._t.start()
+        # Read dablins log files and populate q
+        logger.info("Starting dablin log reader thread")
+        self._t_dablin_log_reader=Thread(target=self._read_stream, args=(self.dablin_proc.stderr, self.dablin_stderr_q,))
+        self._t_dablin_log_reader.start()
+
+        # Consume q and post updates back to main UI
+        logger.info("Starting dablin log parser thread")
+        self._t_dablin_log_parser=Thread(target=self.dablin_log_parser.run, args=(self.dablin_stderr_lookups,))
+        self._t_dablin_log_parser.start()
+
+        logger.info("Player playing")
+
 
     def stop(self):
         self.currently_playing = None
         if self.dablin_proc is not None:
             self.dablin_proc.terminate()
+            self.dablin_log_parser.stop()
         time.sleep(1)
 
-    def _get_line_from_q(self):
+    def _get_line_from_q(self, recd_threshold:int=200):
             s=""
             recd=0
+            # Q returns characters not lines!!
             for c in self.dablin_stderr_q.get_nowait():
                 s+=c
                 recd+=1
-                if c=="\n" or recd>200:
+                if c=="\n" or recd>recd_threshold:
                     break
-            if recd>200:
+            if recd>recd_threshold:
                 self._recv_errors+=1
                 logger.error("Buffer overflowed. Possible reception errors")
                 logger.error("%s",s)
-
             return s
     
     def parse_dablin_output(self):
+        '''
+        Parse the dablin log and run regexs to extract info such as
+        PAD announcements, DAB type etc. See play method for more
+        details.
+        '''
         try:
             l=self._get_line_from_q()
             for lu in self.dablin_stderr_lookups:
@@ -109,22 +234,23 @@ class RadioPlayer():
         return None
 
     def load_multiplexes(self):
-        if Path("multiplex.json").exists():
-            # load from radiodns...?
-            a=1
-            
-        elif Path("default-multiplexes.json"):
+        '''
+        Load default multiplexes.
+
+        TODO: This could be fragile and what about non-uk?
+        '''
+        if Path("default-multiplexes.json"):
             with open("default-multiplexes.json") as m:
                 s_json = json.load(m)
                 self.multiplexes = s_json["uk"]
-        print(self.multiplexes)
+        return self.multiplexes
 
     def scan(self, ui_msg_callback=None):
 
         if ui_msg_callback is not None:
             ui_msg_callback("Starting Scan")
 
-        # Cant scan while RTL is in use
+        # Cant scan while RTLSDR is in use
         self.stop()
 
         stations=dict()
@@ -147,7 +273,7 @@ class RadioPlayer():
             if ensemble_file.exists():
                 with open(ensemble_file, 'r') as jfile:
                     data = json.load(jfile)
-                    ui_msg_callback("Done", f"{data['ensemble']} {len(data['stations'])} stations")
+                    ui_msg_callback("Done", sub_msg=f"{data['ensemble']} {len(data['stations'])} stations")
                     for s,sid in data['stations'].items():
                         if s not in stations:
                             stations[s]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }
