@@ -1,6 +1,7 @@
 import logging
 import json
 from pathlib import Path
+from . import exceptions
 
 class RadioStations():
     def __init__(self):
@@ -9,14 +10,15 @@ class RadioStations():
         self.station_list_index = {}
         self.total_stations = 0
         
-        self.load_stations()
-
     def load_stations(self):
-        with open("station-list.json") as j:
-            self.stations = json.load(j)
-        self.station_list=sorted(list(self.stations.keys()))
-        self.station_list_index={ s:i for i,s in enumerate(self.station_list) }
-        self.total_stations = len(self.station_list)
+        try:
+            with open("station-list.json") as j:
+                self.stations = json.load(j)
+            self.station_list=sorted(list(self.stations.keys()))
+            self.station_list_index={ s:i for i,s in enumerate(self.station_list) }
+            self.total_stations = len(self.station_list)
+        except FileNotFoundError as e:
+            raise exceptions.NoRadioStations(e)
 
     def tuning_details(self, station_name) -> tuple[str,str,str]|None:
         if station_name in self.stations:
