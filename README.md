@@ -1,6 +1,9 @@
 # dabble
 A DAB radio project based on a PI, small LCD and some LED encoders. Very much a work in progress.
 
+This project is targetted to be run on a Raspberry Pi running Raspberry OS (this could change). Assumptions reqarding packages etc 
+rely on this. While the hardware could be run on another system using I2C and I2S I've not tested this. 
+
 ## Current progress
 - Forked and fixed dablin cli to output PAD announcements e.g. now playing
 - UI seems stable
@@ -28,7 +31,6 @@ A DAB radio project based on a PI, small LCD and some LED encoders. Very much a 
 - Modified version of dablin from Opendigialradio, https://github.com/lovemonkey257/dablin
 
 ## Build
-
 Ensure Raspberry Pi has SPI and I2C enabled in config
 
 ```
@@ -38,7 +40,6 @@ sudo reboot
 ```
 
 ### `dablin`
-
 Dependencies first.
 - `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libgtkmm-3.0-dev libfdk-aac-dev
 
@@ -67,13 +68,33 @@ Code:
 This should put `eti-cmdline-rtlsdr` into `/usr/local/bin`
 
 ### Python
+As this needs system installed packages create requirements as follows:
+
+`pip list --not-required --format=freeze -l > requirements.txt`
+
+To install:
 - `sudo apt install python3-alsaaudio python3-pyaudio`
 - Create venv `pip -mvenv venv`
 - Edit ./venv/pyvenv.cfg and ensure `include-system-site-packages` is `true`
 - `pip install -r requirements.txt`
 
 ## Config
-TODO
+Saved state is saved into `dabble_radio.json" e.g.
+
+```  
+{
+    "station_name": "Heart Dance",
+    "ensemble": "D1 National",
+    "volume": 34,
+    "pulse_left_led_encoder": false,
+    "pulse_right_led_encoder": false,
+    "enable_visualiser": true,
+    "visualiser": "waveform",
+    "enable_levels": false
+}
+```
+TODO: What else might need external configuration? Other config settings that should
+be exposed?
 
 ## Running
 - cd into your dev dir
