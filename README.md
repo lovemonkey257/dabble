@@ -8,6 +8,20 @@ rely on this. While the hardware could be run on another system using I2C and I2
 - Forked and fixed dablin cli to output PAD announcements e.g. now playing
 - UI seems stable
 
+## Screenshots of LCD
+### Playing
+Displays scrolling station name with the visualiser in the background; in this case the graphic equaliser. The top two horizonal lines are levels
+but they don't show up so well in a screenshot. The bottom line is Ensemble and DAB type. 
+
+![Playing](docs/playing.png)
+
+### With PAD message
+
+![Playing](docs/pad-msg.png)
+
+### Waveform visualiser
+![Playing](docs/waveform.png)
+
 ## Current problems:
 - Need another encoder as UI is difficult otherwise
 - Will need a menu system (using encoders) to nav settings etc
