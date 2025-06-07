@@ -1,0 +1,2 @@
+class NoRadioStations(Exception):
+    pass
