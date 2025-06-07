@@ -18,6 +18,7 @@ from dabble import radio_stations
 from dabble import lcd_ui
 from dabble import audio_processing
 from dabble import keyboard
+from dabble import exceptions
 
 config_path = Path("dabble_radio.json")
 
@@ -90,10 +91,9 @@ stations=radio_stations.RadioStations()
 logger.info("Initialising player")
 player=radio_player.RadioPlayer(radio_stations=stations)
 
-## TODO: If no stations then force scan?
 try:
     stations.load_stations()
-except:
+except exceptions.NoRadioStations as e:
     player.scan(ui_msg_callback=update_msg)
 
 # Load defaults
@@ -232,21 +232,24 @@ try:
             left_encoder.set_colour_by_value(knob_colour)
         
         last_left_encoder_value = left_encoder_value
-
-        ## TODO: This is a problem!!! If takes too long loop hangs!
-        updates = player.parse_dablin_output()
+      
+        updates = player.dablin_log_parser.updates()
         if updates:
-            if "dab_type" in updates:
-                ui.state.dab_type=updates['dab_type']
-                logger.info(f"Got DAB type: {ui.state.dab_type}")
-            elif "pad_label" in updates:
-                logger.info(f"Got PAD msg: \"{updates['pad_label']}\"")
-                ui.state.last_pad_message = updates['pad_label']
-            elif "media_fmt" in updates:
-                logger.info(f"Audio format: \"{updates['media_fmt']}\"")
-            elif "prog_type" in updates:
-                logger.info(f"Genre: \"{updates['prog_type']}\"")
+            if updates.is_updated('dab_type'):
+                ui.state.dab_type=updates.get('dab_type').value
+                logger.info(f"DAB type: {ui.state.dab_type}")
 
+            elif updates.is_updated('pad_label'):
+                ui.state.last_pad_message = updates.get('pad_label').value
+                logger.info(f"PAD msg: \"{ui.state.last_pad_message}\"")
+
+            elif updates.is_updated('media_fmt'):
+                ui.state.audio_format = updates.get('media_fmt').value
+                logger.info(f"Audio format: \"{ui.state.audio_format}\"")
+
+            elif updates.is_updated('prog_type'):
+                ui.state.genre = updates.get('prog_type').value
+                logger.info(f"Genre: \"{ui.state.genre}\"")
     
 
 except (KeyboardInterrupt,SystemExit):
