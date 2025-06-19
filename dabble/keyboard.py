@@ -1,4 +1,8 @@
-import sys,fcntl,os,termios
+import fcntl
+import os
+import sys
+import termios
+
 
 class Keyboard():
     def __init__(self):

@@ -1,6 +1,8 @@
-import logging
 import colorsys
+import logging
+
 import ioexpander as io
+
 
 class Encoder():
     def __init__(self):
