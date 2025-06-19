@@ -33,6 +33,30 @@ rely on this. While the hardware could be run on another system using I2C and I2
 - Need to decide on audio output e.g. DAC or ??. Currently using HDMI
 - Proper build perhaps into containers
 
+## Possibly menu system
+Two encoders (left, right) both with built in buttons. We have four entry techniques: twist to search, button to select.
+
+### Left Encoder
+Default - Volume
+On click:
+- List of Visualisations:
+    - Graphic Equaliser
+    - Waveform
+    - Levels On/Off
+    - Visualiser On/Off
+
+- Select and click (if off will enable it)
+- If nothing selected revert to play screen
+
+### Right Encoder
+Default - Station select. No button needed to select?
+On click:
+- Menu options displayed:
+    - Themes? 
+    - Country/Language?? Selects ensemble channels
+    - Possibly more
+- If nothing selected for more than 5 secs revert to play screen
+
 ## Ideas
 - Want to stream to airplay/chromecast?? 
 - Turn this into a mini streamer e.g. run shareport-sync et al?
