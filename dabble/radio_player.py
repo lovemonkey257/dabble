@@ -1,20 +1,21 @@
-import logging
-import time
-import re
-import subprocess
-from threading import Thread, Event, Lock
-from queue import Queue,Empty
-from io import StringIO
-import shlex
 import json
+import logging
+import re
+import shlex
 import signal
-import sys 
-from string import Template
-from pathlib import Path
+import subprocess
+import sys
+import time
 from copy import copy
 from dataclasses import dataclass, field
+from io import StringIO
+from pathlib import Path
+from queue import Empty, Queue
+from string import Template
+from threading import Event, Lock, Thread
 
 from . import radio_stations
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -61,6 +62,7 @@ class DablinLogParser():
         self._end_task = e
         self._lookups = dict()
         self._updates_lock = Lock()
+        self._recv_errors = 0
 
     def _get_line_from_q(self, recd_threshold:int=200):
             s=""
