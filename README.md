@@ -1,8 +1,7 @@
 # dabble
-A DAB radio project based on a PI, small LCD and some LED encoders. Very much a work in progress.
+A DAB radio project based on a PI, a small LCD and some LED encoders. The core software is based on the good work of dablin and eti-stuff. It is very much a work in progress.
 
-This project is targetted to be run on a Raspberry Pi running Raspberry OS (this could change). Assumptions reqarding packages etc 
-rely on this. While the hardware could be run on another system using I2C and I2S I've not tested this. 
+This project is targetted to be run on a Raspberry Pi running Raspberry OS (this could change). Assumptions reqarding packages etc rely on this. While the hardware could be run on another system using I2C and I2S I've not tested this. 
 
 ## Current progress and Features
 - Forked and fixed dablin cli to output PAD announcements e.g. now playing
