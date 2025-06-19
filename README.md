@@ -4,7 +4,7 @@ A DAB radio project based on a PI, small LCD and some LED encoders. Very much a 
 This project is targetted to be run on a Raspberry Pi running Raspberry OS (this could change). Assumptions reqarding packages etc 
 rely on this. While the hardware could be run on another system using I2C and I2S I've not tested this. 
 
-## Current progress
+## Current progress and Features
 - Forked and fixed dablin cli to output PAD announcements e.g. now playing
 - UI seems stable
 
@@ -22,10 +22,31 @@ but they don't show up so well in a screenshot. The bottom line is Ensemble and 
 ### Waveform visualiser
 ![Playing](docs/waveform.png)
 
+### Features
+- DAB and DAB+ reception
+- Station name scroll
+- Ensemble displayed and DAB type
+- Waveform visualiser works
+- Graphic equaliser works
+
+![alt text](docs/playing.png)
+![alt text](docs/waveform.png)
+
+- PAD messages updated
+
+![alt text](docs/pad-msg.png)
+
+- Station selection works
+- Volume control works
+- Station scanning works, although need to decide how to handle default list of channels to scan
+- Also captures audio format but not currently displayed
+
+
+
 ## Current problems:
-- Need another encoder as UI is difficult otherwise
+- Need another encoder as UI is difficult otherwise. Using keypresses to work around this
 - Will need a menu system (using encoders) to nav settings etc
-- Need to decide on audio output e.g. DAC or ??
+- Need to decide on audio output e.g. DAC or ??. Currently using HDMI
 - Proper build perhaps into containers
 
 ## Ideas
@@ -55,9 +76,9 @@ sudo reboot
 
 ### `dablin`
 Dependencies first.
-- `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libgtkmm-3.0-dev libfdk-aac-dev
+- `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libgtkmm-3.0-dev libfdk-aac-dev`
 
-Now the code:
+Now the code (assumes using my fork. Hopefully they may include my PR):
 - `sudo apt remove dablin`
 - `git clone https://github.com/lovemonkey257/dablin.git`
 - `cd dablin`
@@ -72,7 +93,7 @@ problems with PAD.
 Dependencies:
 - `sudo apt install build-essential cmake libfftw3f-dev libfftw3f libsamplerate0-dev librtlsdr-dev libspdlog-dev nlohmann-json3-dev libboost libboost-dev libfmt-dev libfmt9 jq`
 
-Code:
+Code. Most changes have been accepted upstream (thanks Jvan) so this is probably redundent:
 - `git clone https://github.com/lovemonkey257/eti-stuff.git`
 - `cd eti-stuff\eti-cmdline`
 - `mkdir build && cd build`
