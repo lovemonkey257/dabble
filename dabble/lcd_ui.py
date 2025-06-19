@@ -1,12 +1,20 @@
-from dataclasses import dataclass, field
-import logging
-from PIL import Image, ImageDraw, ImageFont
-import st7735
-from pathlib import Path
+
 import colorsys
-import numpy as np
+import logging
 import math
-from enum import StrEnum
+from dataclasses import dataclass, field
+from enum import Enum,StrEnum
+from pathlib import Path
+
+import numpy as np
+import st7735
+from PIL import Image, ImageDraw, ImageFont
+
+from . import exceptions
+
+class MessageState(Enum):
+    STATION  = 0
+    LAST_PAD = 1
 
 class GraphicState(StrEnum):
     WAVEFORM="waveform"
@@ -23,9 +31,9 @@ class UIState():
     peak_l:int           = 0
     peak_r:int           = 0
     signal:np.ndarray    = None
-    levels_enabled:bool  =  True
+    levels_enabled:bool  = True
     dab_type:str         = ""
-    current_msg:int      = 0 # 0=Station, 1=Last PAD
+    current_msg:int      = MessageState.STATION
     pulse_left_led_encoder:bool = False
     left_led_rgb         = (255,255,255)
     pulse_right_led_encoder:bool = False
@@ -37,16 +45,32 @@ class UIState():
         return self.last_pad_message if self.last_pad_message else ""
     
     def get_current_message(self):
-            return self.station_name if self.current_msg==0 else self.get_pad_message()
+        '''
+        Get the current message on the UI
+        '''
+        if self.current_msg == MessageState.STATION:
+            return self.station_name
+        if self.current_msg == MessageState.LAST_PAD:
+            return self.get_pad_message()
 
     def get_next_message(self):
-        self.current_msg+=1
-        if self.current_msg > 1:
-            self.current_msg=0
+        '''
+        Flip message between station name and PAD
+        '''
+        if self.current_msg == MessageState.STATION:
+            self.current_msg = MessageState.LAST_PAD
+        elif self.current_msg == MessageState.LAST_PAD:
+            self.current_msg = MessageState.STATION
 
 class LCDUI():
    
-    def __init__(self, station_font_size=19, ensemble_font_size=13):
+    def __init__(self, 
+                 base_font_path:str="liberation/LiberationSans",
+                 station_font_size:int=19, 
+                 station_font_style:str="Regular",
+                 ensemble_font_size:int=13,
+                 ensemble_font_style:str="Regular"):
+
         # Create ST7735 LCD display class.
         self.disp = st7735.ST7735(
             port=0,
@@ -61,29 +85,36 @@ class LCDUI():
         self.WIDTH = self.disp.width
         self.HEIGHT = self.disp.height
         self.CENTRE_HEIGHT = self.HEIGHT//2 # 40 (80/2)
-        self.CENTRE_WIDTH = self.WIDTH//2   # 80 (160/2)
+        self.CENTRE_WIDTH  = self.WIDTH//2  # 80 (160/2)
 
         self.img = Image.new('RGB', (self.WIDTH, self.HEIGHT), color=(0, 0, 0))
         self.draw = ImageDraw.Draw(self.img)
 
-        self.station_font_size = station_font_size
+        ## Fonts!
+        # Beaware of style
+        self.station_font_size  = station_font_size
+        self.ensemble_font_size = ensemble_font_size
 
         self.font_dir=Path("/usr/share/fonts/truetype/")
-        self.base_font = "liberation/LiberationSans"  # "quickstand/Quicksand"
+        self.base_font = base_font_path
 
-        self.station_font_file  = self.get_font_path("Regular") # Regular # str(self.font_dir  / "/quicksand/Quicksand-Bold.ttf")
-        self.ensemble_font_file = self.get_font_path("Regular") # Light # str(self.font_dir / "/quicksand/Quicksand-Light.ttf")
+        self.station_font_file  = self.get_font_path(station_font_style.capitalize())
+        self.ensemble_font_file = self.get_font_path(ensemble_font_style.capitalize())
 
-        self.station_font = ImageFont.truetype(self.station_font_file, station_font_size)
-        self.ensemble_font = ImageFont.truetype(self.ensemble_font_file, ensemble_font_size)
-        self.vol_font = ImageFont.truetype(self.ensemble_font_file, ensemble_font_size)
+        try:
+            self.station_font  = ImageFont.truetype(self.station_font_file, station_font_size)
+            self.ensemble_font = ImageFont.truetype(self.ensemble_font_file, ensemble_font_size)
+            #self.vol_font      = ImageFont.truetype(self.ensemble_font_file, ensemble_font_size)
+        except OSError as e:
+            logging.error("Cannot load font: %s", self.base_font)
+            raise exceptions.FontException
 
         self.station_name_x = self.WIDTH 
         self.station_name_size_x = 0
 
         self.colours = {
-            "ensemble": '#B8B814', # (251,80, 18),
-            "station":  '#FEFE33', # (255, 243,10),
+            "ensemble": '#B8B814', # (251, 80, 18),
+            "station":  '#FEFE33', # (255, 10,10),
             "volume":   '#EFD4F7', # (203, 186, 237),
             "volume_bg": (0, 102, 0),
             "equaliser_line": 'darkviolet',
@@ -213,7 +244,6 @@ class LCDUI():
             self.state.get_next_message()
         #self.station_name_x %= int((self.station_name_size_x + self.WIDTH))
 
-
     def reset_station_name_scroll(self):
         self.station_name_x = self.WIDTH
 
@@ -249,7 +279,7 @@ class LCDUI():
     def scale_log(self, c, f):
         return c * math.log(float(1 + f),10);
 
-    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=2, use_log_scale:bool=False):
+    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=False):
         '''
         Show frequencies using fft
         '''
@@ -262,19 +292,19 @@ class LCDUI():
         mono_signal = (signal[0::2] + signal[1::2]) / 2
 
         # FFT magic
-        fft_mag = np.abs(np.fft.rfft(mono_signal))
+        fft_mag   = np.abs(np.fft.rfft(mono_signal))
         max_mag = np.max(fft_mag)
-        if max_mag==0:
+        if max_mag==0.0:
             return
        
         # Calc scale
-        scale = height/max_mag
+        scale:float = float(height)/max_mag
         if use_log_scale:
             c = max_mag/math.log(max_mag+1,10)/2;
 
-        # Scale steps
+        # Scale steps. Does mean we may miss some freq components.
         end_range = len(fft_mag) - 1
-        step  = int(len(fft_mag)/width)
+        step      = int(len(fft_mag)/width)
         # If too small enforce step size
         if step<=1:
             step=2
@@ -283,12 +313,15 @@ class LCDUI():
         self.draw.rectangle((0,self.HEIGHT-height-base_y,self.WIDTH,self.HEIGHT-base_y), fill="black")
 
         y1=0
-        for i in range(1, end_range, step):
+        for i in range(0, end_range, step):
+            if i==0:
+                continue
+            f=fft_mag[i]
             if use_log_scale:
-                v = round(self.scale_log(c, fft_mag[i]));
+                v = round(self.scale_log(c, f));
                 y1 = int(v * scale)
             else:
-                y1 = int(fft_mag[i] * scale)
+                y1 = int(f * scale)
 
             self.draw.line( ( i, self.HEIGHT - base_y, i , self.HEIGHT - y1 - base_y), fill=self.colours['equaliser_line'])
             self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.colours['equaliser_dot'])
@@ -318,7 +351,7 @@ class LCDUI():
         # Calc scale
         step=int(len(mono_signal)/width)
         end_range = len(mono_signal)-step
-        scale = height/max_mag
+        scale:float = float(height)/max_mag
 
         # Clear
         self.draw.rectangle((0,self.HEIGHT-height-base_y,self.WIDTH,self.HEIGHT-base_y), fill="black")
