@@ -6,19 +6,15 @@ Build:
     also need apt-get install python3-alsaaudio
 '''
 
+import json
 import logging
 import time
-import json
+import sys
 from enum import Enum
 from pathlib import Path
 
-from dabble import encoder
-from dabble import radio_player
-from dabble import radio_stations
-from dabble import lcd_ui
-from dabble import audio_processing
-from dabble import keyboard
-from dabble import exceptions
+from dabble import (audio_processing, encoder, exceptions, keyboard, lcd_ui,
+                    radio_player, radio_stations)
 
 config_path = Path("dabble_radio.json")
 
@@ -61,6 +57,23 @@ def save_state(state:lcd_ui.UIState):
     with open(config_path, "w") as f:
         f.write(json.dumps(config))
 
+def shutdown(ui=None,kb=None,player=None,left_encoder=None):
+    if player:
+        player.stop()
+        time.sleep(1)
+    if ui:
+        save_state(ui.state)
+        ui.clear_screen()
+        ui.reset_station_name_scroll()
+        ui.draw_station_name("Shutting down")
+        ui.update()
+        ui.clear_screen()
+        ui.update()
+    if left_encoder:
+        left_encoder.set_colour_by_rgb((0,0,0))
+    if kb:
+        kb.reset()
+
 def update_msg(msg, sub_msg:str=""):
     ''' Callback to update the UI with a message from the player during scanning '''
     ui.clear_screen()
@@ -69,20 +82,37 @@ def update_msg(msg, sub_msg:str=""):
     ui.draw_ensemble(sub_msg)    
     ui.update()
 
+
+###
+# MAIN
+###
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger(__name__)
+logger.info("Dabble Radio initialising")
 
-logger.info("Radio initialising")
-kb = keyboard.Keyboard()
-left_encoder=encoder.Encoder()
-ui=lcd_ui.LCDUI()
+kb           = keyboard.Keyboard()
+left_encoder = encoder.Encoder()
+ui=None
+
+try:
+    ui=lcd_ui.LCDUI(
+        base_font_path="noto/NotoSans_SemiCondensed", 
+        station_font_style="Bold",
+        station_font_size=20
+    )
+except exceptions.FontException:
+    logging.fatal("Cannot load fonts")
+    shutdown(ui=ui, kb=kb, left_encoder=left_encoder)
+    sys.exit()
 
 # Display startup message
 ui.show_startup()
+
 
 # Initialise stations and player
 logger.info("Loading radio stations")
@@ -91,6 +121,7 @@ stations=radio_stations.RadioStations()
 logger.info("Initialising player")
 player=radio_player.RadioPlayer(radio_stations=stations)
 
+# Load stations. If none then initiate scan
 try:
     stations.load_stations()
 except exceptions.NoRadioStations as e:
@@ -105,12 +136,13 @@ left_encoder.set_colour_by_rgb(ui.state.left_led_rgb)
 
 logger.info(f'Begin playing {ui.state.station_name}')
 player.play(ui.state.station_name)
-time.sleep(5)
 ui.state.station_name = player.playing
 ui.state.ensemble = player.ensemble
+ui.update()
+time.sleep(5)
 
 logger.info("Audio processing initialising")
-audio = audio_processing.AudioProcessing()
+audio = audio_processing.AudioProcessing(frame_chunk_size=512)
 audio_stream = audio.start()
 
 # Time user started twiddling
@@ -131,11 +163,18 @@ logger.info(f'Volume set to {audio.volume}')
 logger.info("Radio main loop starting")
 try:
     while True:
-        # TODO: Needs to be earlier?
-        if audio.stream.is_active():
-            (ui.state.peak_l, ui.state.peak_r) = audio.get_peaks()
-            ui.state.signal = audio.signal
 
+        # Get audio data before anything else
+        if audio.stream.is_active():
+            if audio.get_sample():
+                ui.state.signal = audio.signal
+                if ui.state.levels_enabled:
+                    (ui.state.peak_l, ui.state.peak_r) = audio.get_peaks()
+
+        ##
+        ## Test code to emulate two encoders
+        ## TODO: Get more encoders!!
+        ##
         k = kb.get_key()
         if k=="v":
             logging.info("Volume mode")
@@ -161,16 +200,19 @@ try:
             ui.state.visualiser = lcd_ui.GraphicState.GRAPHIC_EQUALISER
             logging.info("Graphic Equaliser graphic selected: %s", ui.state.visualiser)
 
+        # Get current encoder value
         if left_encoder.ioe.get_interrupt():
             left_encoder_value = left_encoder.ioe.read_rotary_encoder(1)
             left_encoder.ioe.clear_interrupt()
 
+        # Given state do something
         if mode==EncoderState.SCANNING:
             was_playing = player.playing
             # Scan will reload station list
             player.scan(ui_msg_callback=update_msg)
             mode=EncoderState.CHANGE_STATION
             player.play(was_playing)
+            # Wait for dabble/eti-cmdline to restart
             time.sleep(2)
 
         elif mode==EncoderState.CHANGE_STATION:
@@ -215,24 +257,20 @@ try:
             logger.info(f'Now playing {new_station_name}')
             time.sleep(0.9)
             changing_station=False
-        else:
-            if not changing_station:
-                ui.scroll_station_name()
-                audio_stream.start_stream()
-                ui.state.station_name = player.playing
-                ui.state.ensemble = player.ensemble
+        elif not changing_station:
+            # Scroll station name
+            ui.scroll_station_name()
+            # Make sure audio stream is playing
+            audio_stream.start_stream()
+            # Set UI state
+            ui.state.station_name = player.playing
+            ui.state.ensemble = player.ensemble
 
-
-        ui.draw_interface()
-        ## and .... breathe
-        time.sleep(0.005)
 
         if ui.state.pulse_left_led_encoder:
             knob_colour = (ui.state.peak_l + ui.state.peak_r) / 2 
-            left_encoder.set_colour_by_value(knob_colour)
-        
-        last_left_encoder_value = left_encoder_value
-      
+            left_encoder.set_colour_by_value(knob_colour)       
+     
         updates = player.dablin_log_parser.updates()
         if updates:
             if updates.is_updated('dab_type'):
@@ -250,21 +288,17 @@ try:
             elif updates.is_updated('prog_type'):
                 ui.state.genre = updates.get('prog_type').value
                 logger.info(f"Genre: \"{ui.state.genre}\"")
+
+        # Record last encoder value
+        last_left_encoder_value = left_encoder_value
+
+        # Draw the UI
+        ui.draw_interface()
+
+        ## and .... breathe
+        time.sleep(0.005)
     
 
 except (KeyboardInterrupt,SystemExit):
-    save_state(ui.state)
-
-    ui.clear_screen()
-    ui.reset_station_name_scroll()
-    ui.draw_station_name("Shutting down")
-    ui.update()
-    player.stop()
-    time.sleep(1)
-    ui.clear_screen()
-    ui.update()
-
-    left_encoder.set_colour_by_rgb((0,0,0))
-    kb.reset()
-
+    shutdown(ui=ui, kb=kb, player=player, left_encoder=left_encoder)
     logger.info("Radio Hard Stop")
