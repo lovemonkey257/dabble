@@ -58,21 +58,25 @@ def save_state(state:lcd_ui.UIState):
         f.write(json.dumps(config))
 
 def shutdown(ui=None,kb=None,player=None,left_encoder=None):
-    if player:
-        player.stop()
-        time.sleep(1)
     if ui:
         save_state(ui.state)
         ui.clear_screen()
         ui.reset_station_name_scroll()
-        ui.draw_station_name("Shutting down")
+        ui.draw_station_name("Bye!")
         ui.update()
-        ui.clear_screen()
-        ui.update()
+        
+    if player:
+        player.stop()
+        time.sleep(1)
+        
     if left_encoder:
         left_encoder.set_colour_by_rgb((0,0,0))
     if kb:
         kb.reset()
+
+    if ui:
+        ui.clear_screen()
+        ui.update()
 
 def update_msg(msg, sub_msg:str=""):
     ''' Callback to update the UI with a message from the player during scanning '''
@@ -96,8 +100,9 @@ logger = logging.getLogger(__name__)
 logger.info("Dabble Radio initialising")
 
 kb           = keyboard.Keyboard()
-left_encoder = encoder.Encoder()
-ui=None
+left_encoder  = encoder.Encoder(device_type=encoder.EncoderTypes.FERMION_EC11_BREAKOUT, pin_a=17, pin_b=27, pin_c=23)
+right_encoder = encoder.Encoder(device_type=encoder.EncoderTypes.FERMION_EC11_BREAKOUT, pin_a=24, pin_b=25, pin_c=22)
+ui           = None
 
 try:
     ui=lcd_ui.LCDUI(
@@ -112,7 +117,6 @@ except exceptions.FontException:
 
 # Display startup message
 ui.show_startup()
-
 
 # Initialise stations and player
 logger.info("Loading radio stations")
@@ -134,6 +138,7 @@ current_config = load_state(ui.state)
 logger.info("Setting colour of left encoder")
 left_encoder.set_colour_by_rgb(ui.state.left_led_rgb)
 
+
 logger.info(f'Begin playing {ui.state.station_name}')
 player.play(ui.state.station_name)
 ui.state.station_name = player.playing
@@ -143,24 +148,31 @@ time.sleep(5)
 
 logger.info("Audio processing initialising")
 audio = audio_processing.AudioProcessing(frame_chunk_size=512)
+# Set volume
+audio.set_volume(ui.state.volume)
+logger.info(f'Volume set to {audio.volume}')
+
 audio_stream = audio.start()
 
 # Time user started twiddling
 left_encoder_start_rotate_time=0 # time.time()
 
 # True if we are to change channel (after twiddling)
-changing_station=False
-scroll_station_name=False
-new_station_name="?"
-new_ensemble="?"
-left_encoder_value=0
-mode=EncoderState.CHANGE_STATION
+changing_station    = False
+scroll_station_name = False
+new_station_name    = "?"
+new_ensemble        = "?"
+left_encoder_value  = 0
+right_encoder_value = 0
+mode                = EncoderState.CHANGE_STATION
 last_left_encoder_value = 0
+last_right_encoder_value = 0
 
-audio.set_volume(ui.state.volume)
-logger.info(f'Volume set to {audio.volume}')
 
+# Lets start the party....
 logger.info("Radio main loop starting")
+audio_stream.start_stream()
+ui.reset_station_name_scroll()
 try:
     while True:
 
@@ -176,13 +188,7 @@ try:
         ## TODO: Get more encoders!!
         ##
         k = kb.get_key()
-        if k=="v":
-            logging.info("Volume mode")
-            mode=EncoderState.CHANGE_VOLUME
-        elif k=="s":
-            logging.info("Station mode")
-            mode=EncoderState.CHANGE_STATION
-        elif k=="S":
+        if k=="S":
             logging.info("Scanning initiated")
             mode=EncoderState.SCANNING
         elif k=="V":
@@ -201,9 +207,19 @@ try:
             logging.info("Graphic Equaliser graphic selected: %s", ui.state.visualiser)
 
         # Get current encoder value
-        if left_encoder.ioe.get_interrupt():
-            left_encoder_value = left_encoder.ioe.read_rotary_encoder(1)
-            left_encoder.ioe.clear_interrupt()
+        if left_encoder.device_type == encoder.EncoderTypes.PIMORONI_RGB_BREAKOUT:
+            if left_encoder.ioe.get_interrupt():
+                left_encoder_value = left_encoder.ioe.read_rotary_encoder(1)
+                left_encoder.ioe.clear_interrupt()
+        elif left_encoder.device_type == encoder.EncoderTypes.FERMION_EC11_BREAKOUT:
+            left_encoder_value = left_encoder.device.steps
+
+        if right_encoder.device_type == encoder.EncoderTypes.PIMORONI_RGB_BREAKOUT:
+            if right_encoder.ioe.get_interrupt():
+                right_encoder_value = right_encoder.ioe.read_rotary_encoder(1)
+                right_encoder.ioe.clear_interrupt()
+        elif right_encoder.device_type == encoder.EncoderTypes.FERMION_EC11_BREAKOUT:
+            right_encoder_value = right_encoder.device.steps
 
         # Given state do something
         if mode==EncoderState.SCANNING:
@@ -215,33 +231,32 @@ try:
             # Wait for dabble/eti-cmdline to restart
             time.sleep(2)
 
-        elif mode==EncoderState.CHANGE_STATION:
-            # Changing station? Knob being twiddled?
-            if left_encoder_value != last_left_encoder_value:
-                # Get index of station in list and correct given current station
-                station_number = left_encoder_value + player.radio_stations.station_index(player.playing)
+        # Changing station? Left Knob being twiddled?
+        if left_encoder_value != last_left_encoder_value:
+            # Get index of station in list and correct given current station
+            station_number = left_encoder_value + player.radio_stations.station_index(player.playing)
 
-                # Get the new station name and details
-                (new_station_name, new_station_details)=player.radio_stations.select_station(station_number)
-                new_ensemble = new_station_details['ensemble']
-                ui.state.station_name = new_station_name
-                ui.state.ensemble = new_ensemble
-                ui.state.current_msg = 0
-                logger.info(f'New station {new_station_name} {new_ensemble} selected')
-                ui.reset_station_name_scroll()
+            # Get the new station name and details
+            (new_station_name, new_station_details)=player.radio_stations.select_station(station_number)
+            new_ensemble          = new_station_details['ensemble']
+            ui.state.station_name = new_station_name
+            ui.state.ensemble     = new_ensemble
+            ui.state.current_msg  = lcd_ui.MessageState.STATION
+            logger.info(f'New station {new_station_name}/{new_ensemble} selected')
+            ui.reset_station_name_scroll()
 
-                # Record when we started twiddling the knob and indicate station is changing
-                left_encoder_start_rotate_time = time.time()
-                changing_station=True
+            # Record when we started twiddling the knob and indicate station is changing
+            left_encoder_start_rotate_time = time.time()
+            changing_station=True
 
-        elif mode==EncoderState.CHANGE_VOLUME:
-            if left_encoder_value != last_left_encoder_value:
-                # Turning left?
-                if left_encoder_value<last_left_encoder_value:
-                    ui.state.volume = audio.vol_down(2)
-                # Turning right?
-                elif left_encoder_value>last_left_encoder_value:
-                    ui.state.volume = audio.vol_up(2)
+        # Changing volume? Right knob being twiddled
+        if right_encoder_value != last_right_encoder_value:
+            # Turning left?
+            if right_encoder_value<last_right_encoder_value:
+                ui.state.volume = audio.vol_down(2)
+            # Turning right?
+            elif right_encoder_value>last_right_encoder_value:
+                ui.state.volume = audio.vol_up(2)
 
         # scroll text once stopped twiddling know and changed channel?
         left_encoder_stopped_twiddling = time.time() - left_encoder_start_rotate_time > 2
@@ -250,24 +265,24 @@ try:
         if left_encoder_stopped_twiddling and changing_station:
             player.stop()
             player.play(new_station_name)
+            audio_stream.start_stream()
             ui.state.station_name = new_station_name
             ui.state.dab_type = ""
             ui.state.last_pad_message = ""
+            ui.state.station_name = player.playing
+            ui.state.ensemble = player.ensemble
             ui.draw_interface(reset_scroll=True)
             logger.info(f'Now playing {new_station_name}')
             time.sleep(0.9)
             changing_station=False
+
         elif not changing_station:
             # Scroll station name
             ui.scroll_station_name()
-            # Make sure audio stream is playing
             audio_stream.start_stream()
-            # Set UI state
-            ui.state.station_name = player.playing
-            ui.state.ensemble = player.ensemble
 
-
-        if ui.state.pulse_left_led_encoder:
+        if left_encoder.device_type.PIMORONI_RGB_BREAKOUT:
+           if ui.state.pulse_left_led_encoder:
             knob_colour = (ui.state.peak_l + ui.state.peak_r) / 2 
             left_encoder.set_colour_by_value(knob_colour)       
      
@@ -290,7 +305,8 @@ try:
                 logger.info(f"Genre: \"{ui.state.genre}\"")
 
         # Record last encoder value
-        last_left_encoder_value = left_encoder_value
+        last_left_encoder_value  = left_encoder_value
+        last_right_encoder_value = right_encoder_value
 
         # Draw the UI
         ui.draw_interface()
@@ -300,5 +316,6 @@ try:
     
 
 except (KeyboardInterrupt,SystemExit):
+    logging.info("Shutting down")
     shutdown(ui=ui, kb=kb, player=player, left_encoder=left_encoder)
     logger.info("Radio Hard Stop")
