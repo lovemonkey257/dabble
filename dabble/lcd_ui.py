@@ -55,9 +55,9 @@ class UIState():
 
     def get_next_message(self):
         '''
-        Flip message between station name and PAD
+        Flip message between station name and PAD (if PAD has been received)
         '''
-        if self.current_msg == MessageState.STATION:
+        if self.current_msg == MessageState.STATION and self.last_pad_message!="":
             self.current_msg = MessageState.LAST_PAD
         elif self.current_msg == MessageState.LAST_PAD:
             self.current_msg = MessageState.STATION
@@ -71,12 +71,13 @@ class LCDUI():
                  ensemble_font_size:int=13,
                  ensemble_font_style:str="Regular"):
 
-        # Create ST7735 LCD display class.
+        # Create ST7735 LCD display class. Taken from Pimoroni docs
         self.disp = st7735.ST7735(
             port=0,
-            cs=st7735.BG_SPI_CS_FRONT,# BG_SPI_CS_BACK or BG_SPI_CS_FRONT. BG_SPI_CS_FRONT (eg: CE1) for Enviro Plus
-            dc="GPIO9",               # "GPIO9" / "PIN21". "PIN21" for a Pi 5 with Enviro Plus
-            backlight="GPIO19",       # "PIN18" for back BG slot, "PIN19" for front BG slot. "PIN32" for a Pi 5 with Enviro Plus
+            cs=0,
+            dc="GPIO9",
+            #backlight="GPIO19",
+            backlight="GPIO16",
             rotation=90,
             spi_speed_hz=4000000
         )
@@ -91,7 +92,7 @@ class LCDUI():
         self.draw = ImageDraw.Draw(self.img)
 
         ## Fonts!
-        # Beaware of style
+        # Beware of style
         self.station_font_size  = station_font_size
         self.ensemble_font_size = ensemble_font_size
 
@@ -217,10 +218,13 @@ class LCDUI():
         (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
         text_w = self.draw.textlength(t, font=self.ensemble_font)
         if clear:
-            self.draw.rectangle((self.WIDTH//2,self.HEIGHT-(y2-y1)-14, self.WIDTH, self.HEIGHT), (0, 0, 0))
+            self.draw.rectangle((self.WIDTH//2,self.HEIGHT-(y2-y1)-16, self.WIDTH, self.HEIGHT), (0, 0, 0))
         self.draw.text( (self.WIDTH-text_w,self.HEIGHT-2), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
 
     def draw_station_name(self, t:str, clear:bool=False):
+        if t is None:
+            t=" "
+
         (x1,y1,x2,y2) = self.station_font.getbbox(t)
 
         # Center in x and y
@@ -239,7 +243,7 @@ class LCDUI():
         self.station_name_x += int(speed)
 
         # Rotate back 
-        if self.station_name_x>= self.station_name_size_x + self.WIDTH:
+        if self.station_name_x >= self.station_name_size_x + self.WIDTH:
             self.station_name_x = 0
             self.state.get_next_message()
         #self.station_name_x %= int((self.station_name_size_x + self.WIDTH))
