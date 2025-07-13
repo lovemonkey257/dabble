@@ -146,10 +146,8 @@ be exposed?
 - `python radio.py`
 
 ## Use
-To simulate multiple encoders I'm using keypresses. For examplei:
+To simulate menus use these keypresses:
 
-- Volume: press `v` then encoder changes volume
-- Stations: press `s` then encoder steps through stations
 - Scanning: press `S`
 - Change visualiser: Press `g` for graphic equaliser, `w` for waveform
 
