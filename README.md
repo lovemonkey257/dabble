@@ -6,6 +6,8 @@ This project is targetted to be run on a Raspberry Pi running Raspberry OS (this
 ## Current progress and Features
 - Forked and fixed dablin cli to output PAD announcements e.g. now playing
 - UI seems stable
+- Using Adafruit speakerbonnet/amp. While audio works fine it seems the MAX98357A doesnt allow audio capture so waveforms etc not displayed. Need to see if I can make Alsa play nice with loopback? Seems that Alsa is 90% magic and 10% weirdness. 
+- Two encoders work
 
 ### Features
 - DAB and DAB+ reception
@@ -27,9 +29,7 @@ This project is targetted to be run on a Raspberry Pi running Raspberry OS (this
 - Also captures audio format but not currently displayed
 
 ## Current problems:
-- Need another encoder as UI is difficult otherwise. Using keypresses to work around this
 - Will need a menu system (using encoders) to nav settings etc
-- Need to decide on audio output e.g. DAC or ??. Currently using HDMI
 - Proper build perhaps into containers
 
 ## Possibly menu system
@@ -61,9 +61,11 @@ On click:
 - Turn this into a mini streamer e.g. run shareport-sync et al?
 
 ## Components
-- PI3 or greater. I'm currently using a PI5 which is probably overkill. Will probably try a Pi Zero W.
+- PI3 or greater. I'm currently using a PI5 which is probably overkill. Will probably try a Pi Zero W but memory is a little tight.
 - [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
 - 1 x [LED encoders](https://shop.pimoroni.com/products/rgb-encoder-breakout) although I may change these to ones that include a button. But LEDS.... But switch!! Shame LED ones don't have a switch.
+- 2 x [Fermion EC11 encoders](https://thepihut.com/products/fermion-ec11-rotary-encoder-module-breakout). These work well and I'm using these instead of the pretty one.
+- 1 x [Adafruit Speaker Bonnet](https://www.adafruit.com/product/3346). Can use 3W 8Ohm speakers which should be powerful enough
 - RTLSDR (a cheap one will probably do, I'm using an official RTL-SDR.com v3). Move to Nano RTLSDR
 - No idea about an enclosure yet. Will prototype it in thin MDF
 
