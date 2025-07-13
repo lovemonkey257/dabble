@@ -64,7 +64,7 @@ class DablinLogParser():
         self._updates_lock = Lock()
         self._recv_errors = 0
 
-    def _get_line_from_q(self, recd_threshold:int=200):
+    def _get_line_from_q(self, recd_threshold:int=255):
             s=""
             recd=0
             # Q returns characters not lines!!
@@ -75,7 +75,7 @@ class DablinLogParser():
                     break
             if recd>recd_threshold:
                 self._recv_errors+=1
-                logger.error("Buffer overflowed. Possible reception errors")
+                logger.error("Log buffer overflowed. Probable reception errors")
                 logger.error("%s",s)
             logger.debug("Line read from q: %s", s)
             return s
