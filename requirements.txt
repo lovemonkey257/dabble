@@ -1,7 +1,10 @@
+adafruit-python-shell==1.9.1
 gpiodevice==0.0.5
 pillow==11.2.1
 pimoroni-ioexpander==1.0.1
 pip==23.0.1
+pyalsaaudio==0.11.0
+python-statemachine==2.5.0
 rpi-lgpio==0.6
 setuptools==66.1.1
 st7735==1.0.0
