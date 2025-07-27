@@ -19,9 +19,13 @@ class RadioStations():
             self.station_list_index={ s:i for i,s in enumerate(self.station_list) }
             self.total_stations = len(self.station_list)
         except FileNotFoundError as e:
+            logging.warn("No radio stations found")
             raise exceptions.NoRadioStations(e)
 
     def tuning_details(self, station_name) -> tuple[str,str,str]|None:
+        if self.total_stations == 0:
+            self.load_stations()
+
         if station_name in self.stations:
             station_sid = self.stations[station_name]['sid']
             station_channel = self.stations[station_name]['channel']
