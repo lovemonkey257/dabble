@@ -54,6 +54,13 @@ class AudioProcessing():
         self.mixer.setvolume(vol, self.channel)
 
     def start(self):
+        '''
+        Start audio recording so we can get waveform etc
+
+        When using some hardware there is no "record" interface, such as on
+        the Adafruit speaker bonnet. Therefore you need to specify the device
+        on the command line e.g. AUDIODEV=xx python ..
+        '''
         self.stream=self.p.open(
                         format=pyaudio.paInt16,
                         channels=2,
