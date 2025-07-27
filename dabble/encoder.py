@@ -3,13 +3,27 @@ import logging
 
 from enum import Enum
 
+logger = logging.getLogger(__name__)
+
+class ButtonPositions(Enum):
+    LEFT  = 1
+    RIGHT = 2
+
 class EncoderTypes(Enum):
     PIMORONI_RGB_BREAKOUT = 1
     FERMION_EC11_BREAKOUT = 2
 
 class Encoder():
-    def __init__(self, device_type=EncoderTypes.PIMORONI_RGB_BREAKOUT, pin_a:int=17, pin_b:int=27, pin_c:int=23):
+    def __init__(self, 
+                 device_type=EncoderTypes.PIMORONI_RGB_BREAKOUT, 
+                 pin_a:int=17, 
+                 pin_b:int=27, 
+                 pin_c:int=23,
+                 button_press_callback=None,
+                 button_position:int=ButtonPositions.LEFT):
+
         self.device_type = device_type
+        self.position    = button_position
         if device_type==EncoderTypes.PIMORONI_RGB_BREAKOUT:
             import ioexpander as io
             self.I2C_ADDR = 0x0F  # 0x18 for IO Expander, 0x0F for the encoder breakout
@@ -37,9 +51,13 @@ class Encoder():
 
         elif device_type==EncoderTypes.FERMION_EC11_BREAKOUT:
             from gpiozero import Button, RotaryEncoder
-            ## TODO: Validate PIN numbers
-            self.button=Button(pin_c, bounce_time=0.1)
             self.device = RotaryEncoder(a=pin_a,b=pin_b,wrap=True,max_steps=180)
+            ## TODO: Validate PIN numbers
+            self.button=Button(pin_c, bounce_time=0.2)
+            if button_press_callback is not None:
+                logger.info("Button callback set")
+                #self.button.when_pressed = button_press_callback
+                self.button.when_released = button_press_callback
             self.has_led = False
 
     def set_colour_by_value(self, colour):
