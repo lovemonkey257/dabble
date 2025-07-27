@@ -86,6 +86,15 @@ def update_msg(msg, sub_msg:str=""):
     ui.draw_ensemble(sub_msg)    
     ui.update()
 
+def update_menu_state_left(button):
+    logger.info(button)
+    if not ui.state.right_menu_enabled:
+        ui.state.left_menu_enabled = not ui.state.left_menu_enabled
+
+def update_menu_state_right(button):
+    logger.info(button)
+    if not ui.state.left_menu_enabled:
+        ui.state.right_menu_enabled = not ui.state.right_menu_enabled
 
 ###
 # MAIN
@@ -99,10 +108,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.info("Dabble Radio initialising")
 
-kb           = keyboard.Keyboard()
-left_encoder  = encoder.Encoder(device_type=encoder.EncoderTypes.FERMION_EC11_BREAKOUT, pin_a=17, pin_b=27, pin_c=23)
-right_encoder = encoder.Encoder(device_type=encoder.EncoderTypes.FERMION_EC11_BREAKOUT, pin_a=24, pin_b=25, pin_c=22)
-ui           = None
+ui = None
+kb = keyboard.Keyboard()
+
+left_encoder  = encoder.Encoder(
+        device_type=encoder.EncoderTypes.FERMION_EC11_BREAKOUT, 
+        pin_a=17, pin_b=27, pin_c=23, 
+        button_press_callback=update_menu_state_left)
+
+right_encoder = encoder.Encoder(
+        device_type=encoder.EncoderTypes.FERMION_EC11_BREAKOUT, 
+        pin_a=24, pin_b=25, pin_c=22, 
+        button_press_callback=update_menu_state_right)
 
 try:
     ui=lcd_ui.LCDUI(
@@ -213,6 +230,8 @@ try:
                 left_encoder.ioe.clear_interrupt()
         elif left_encoder.device_type == encoder.EncoderTypes.FERMION_EC11_BREAKOUT:
             left_encoder_value = left_encoder.device.steps
+            #if left_encoder.button.is_pressed:
+            #    logging.info("Left encoder button pressed")
 
         if right_encoder.device_type == encoder.EncoderTypes.PIMORONI_RGB_BREAKOUT:
             if right_encoder.ioe.get_interrupt():
@@ -220,6 +239,8 @@ try:
                 right_encoder.ioe.clear_interrupt()
         elif right_encoder.device_type == encoder.EncoderTypes.FERMION_EC11_BREAKOUT:
             right_encoder_value = right_encoder.device.steps
+            #if right_encoder.button.is_pressed:
+            #    logging.info("Right encoder button pressed")
 
         # Given state do something
         if mode==EncoderState.SCANNING:
