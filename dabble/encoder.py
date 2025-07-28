@@ -5,7 +5,7 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-class ButtonPositions(Enum):
+class EncoderPosition(Enum):
     LEFT  = 1
     RIGHT = 2
 
@@ -20,7 +20,7 @@ class Encoder():
                  pin_b:int=27, 
                  pin_c:int=23,
                  button_press_callback=None,
-                 button_position:int=ButtonPositions.LEFT):
+                 button_position:int=EncoderPosition.LEFT):
 
         self.device_type = device_type
         self.position    = button_position

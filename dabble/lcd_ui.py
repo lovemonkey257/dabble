@@ -2,15 +2,23 @@
 import colorsys
 import logging
 import math
+import functools
 from dataclasses import dataclass, field
 from enum import Enum,StrEnum
 from pathlib import Path
+import threading
 
 import numpy as np
 import st7735
 from PIL import Image, ImageDraw, ImageFont
 
-from . import exceptions
+from . import exceptions, menu, encoder
+
+logger = logging.getLogger(__name__)
+
+# Constants
+class Locks:
+    INTERFACE = threading.Lock()
 
 class MessageState(Enum):
     STATION  = 0
@@ -27,21 +35,37 @@ class UIState():
     last_pad_message:str = ""
     audio_format:str     = ""
     genre:str            = ""
+    dab_type:str         = ""
+    current_msg:int      = MessageState.STATION
+
     volume:int           = 40
     peak_l:int           = 0
     peak_r:int           = 0
     signal:np.ndarray    = None
-    levels_enabled:bool  = True
-    dab_type:str         = ""
-    current_msg:int      = MessageState.STATION
-    left_menu_enabled:bool  = False  # If set then menu is being displayed
-    right_menu_enabled:bool = False
+
+    radio_state:menu.StateMachine  = None
+    current_menu_item:str          = None
+    lm:menu.Menu                   = None # Left Menu
+    rm:menu.Menu                   = None # Right Menu
+    station_timer:threading.Thread = None
+    left_encoder:encoder.Encoder   = None
+    right_encoder:encoder.Encoder  = None
+
     pulse_left_led_encoder:bool = False
     pulse_right_led_encoder:bool = False
     left_led_rgb         = (255,255,255)
     right_led_rgb        = (255,255,255)
+
     visualiser_enabled:bool = True
     visualiser:GraphicState = GraphicState.GRAPHIC_EQUALISER
+    levels_enabled:bool  = True
+
+    def update(self, prop, value):
+        '''
+        Allow state to be changed using <obj>.update("prop",value)
+        Means it can be used in lambdas which don't like <obj>.<prop>=<value>
+        '''
+        setattr(self, prop, value)
 
     def get_pad_message(self):
         '''
@@ -73,16 +97,19 @@ class UIState():
 
 
 class LCDUI():
+
     def __init__(self, 
                  base_font_path:str="liberation/LiberationSans",
-                 station_font_size:int=19, 
+                 station_font_size:int=18, 
                  station_font_style:str="Regular",
                  ensemble_font_size:int=13,
                  ensemble_font_style:str="Regular",
-                 menu_font_size:int=19,
+                 menu_font_size:int=20,
                  menu_font_style:str="Regular",
                  dc_gpio:str="GPIO9",
                  backlight_gpio:str="GPIO16"):
+
+        self._lock = Locks.INTERFACE
 
         # Create ST7735 LCD display class. Taken from Pimoroni docs
         # 160 x 80 full colour
@@ -121,8 +148,8 @@ class LCDUI():
         try:
             self.station_font    = ImageFont.truetype(self.station_font_file, station_font_size)
             self.ensemble_font   = ImageFont.truetype(self.ensemble_font_file, ensemble_font_size)
-            self.menu_font       = ImageFont.truetype(self.menu_font_file, menu_font_size)
-            self.menu_title_font = ImageFont.truetype(self.menu_font_file, menu_font_size-2)
+            self.menu_sel_font   = ImageFont.truetype(self.menu_font_file, menu_font_size)
+            self.menu_font       = ImageFont.truetype(self.menu_font_file, menu_font_size-2)
         except OSError as e:
             logging.error("Cannot load font: %s", self.base_font)
             raise exceptions.FontException
@@ -150,16 +177,11 @@ class LCDUI():
         return str(self.font_dir  / f'{self.base_font}-{style}.ttf')
    
 
-    def draw_interface(self, reset_scroll=False):
+    def draw_interface(self, reset_scroll=False, dim_screen=True):
         '''
         Draw the entire interface
         '''
-        if self.state.left_menu_enabled or self.state.right_menu_enabled:
-            # Menu displayed
-            self.clear_screen()
-            self.draw_menu("Graphic Equaliser", title="Visualisations")
-
-        else:
+        with self._lock:
             # Normal display
             clear_sn = not self.state.visualiser_enabled
             if reset_scroll:
@@ -180,11 +202,21 @@ class LCDUI():
             self.draw_ensemble(self.state.ensemble, clear=True)
             self.draw_dab_type(self.state.dab_type, clear=True)
 
-        self.update()
+            # Draw menu over dimmed image
+            dimmed_image=None
+            if self.state.radio_state.left_menu_activated.is_active or \
+               self.state.radio_state.right_menu_activated.is_active:
+                dimmed_image= Image.eval(self.img, lambda x: x / 2)
+                self.draw_menu(draw=ImageDraw.Draw(dimmed_image))
+
+            self.update(img=dimmed_image)
 
 
-    def update(self):
-        self.disp.display(self.img)
+    def update(self,img=None):
+        if img is None:
+            self.disp.display(self.img)
+        else:
+            self.disp.display(img)
 
 
     def clear_screen(self, draw_center_lines:bool=False):
@@ -243,55 +275,68 @@ class LCDUI():
         return (x1,y1,x2,y2,text_height,text_width)
     
 
-    def draw_ensemble(self, t:str, clear:bool=False):
-        (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
-        text_w = self.WIDTH//2
+    def draw_ensemble(self, t:str, clear:bool=True):
+        (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.ensemble_font)
+        mid_point = self.WIDTH//2
         if clear:
-            self.draw.rectangle((0,self.HEIGHT-(y2-y1)-12, text_w, self.HEIGHT), (0, 0, 0))
-        self.draw.text( (0,self.HEIGHT-2), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
+            self.draw.rectangle((0,self.HEIGHT-text_height-4, mid_point, self.HEIGHT), (0, 0, 0))
+        self.draw.text( (0,self.HEIGHT), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
 
 
-    def draw_dab_type(self, t:str, clear:bool=False):
-        (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
-        text_w = self.draw.textlength(t, font=self.ensemble_font)
+    def draw_dab_type(self, t:str, clear:bool=True):
+        (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.ensemble_font)
+        mid_point = self.WIDTH//2
         if clear:
-            self.draw.rectangle((self.WIDTH//2,self.HEIGHT-(y2-y1)-16, self.WIDTH, self.HEIGHT), (0, 0, 0))
-        self.draw.text( (self.WIDTH-text_w,self.HEIGHT-2), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
+            self.draw.rectangle((mid_point,self.HEIGHT-text_height-4, self.WIDTH, self.HEIGHT), (0, 0, 0))
+        self.draw.text( (self.WIDTH,self.HEIGHT), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="rd")
 
 
-    def draw_menu(self, t:str, title:str=""):
-        (_,t_y1,_,t_y2,title_text_height,title_text_width) = self._get_text_hw_and_bb(title, font=self.menu_title_font)
-        self.draw.text( (1,1), title, font=self.menu_title_font, fill=self.colours["menu"])# , anchor="ls")
+    def draw_menu(self, draw=None):
+        draw = self.draw if draw is None else draw
 
-        (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.menu_font)
-        text_x = 10
-        text_y = t_y2 
-        self.draw.text( (text_x, text_y), t, font=self.menu_font, fill=self.colours["menu"]) #, anchor="ls")
+        (x1,y1,x2,y2,cm_height,cm_width) = self._get_text_hw_and_bb(self.state.current_menu_item, font=self.menu_sel_font)
+        half_text_height = cm_height // 2
+
+        x=0
+        anchor="lt"
+        menu_list=[]
+        if self.state.radio_state.left_menu_activated.is_active:
+            anchor="lt"
+            x=5
+            m=self.state.lm.menu_list 
+        elif self.state.radio_state.right_menu_activated.is_active:
+            anchor="rt"
+            x=self.WIDTH
+            m=self.state.rm.menu_list 
+
+        # TODO draw other menu items
+        draw.text( (x, self.CENTRE_HEIGHT-half_text_height), self.state.current_menu_item, font=self.menu_sel_font, fill=self.colours["menu"], anchor=anchor)
        
 
     def draw_station_name(self, t:str, clear:bool=False):
         if t is None:
             t=" "
 
-        (x1,y1,x2,y2) = self.station_font.getbbox(t)
-        self.station_name_size_x = self.draw.textlength(t, font=self.station_font)
-        text_height = y2 - y1
+        (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.station_font)
+        half_text_height = text_height // 2
         # Calc text x with scroll factor
         text_x = self.WIDTH - self.station_name_x
-        text_y = self.CENTRE_HEIGHT - text_height
+        self.station_name_size_x = text_width
         if clear:
-            self.draw.rectangle((0,text_y, self.WIDTH, text_y + text_height), (0, 0, 0))
-        self.draw.text( (text_x, self.CENTRE_HEIGHT), t, font=self.station_font, fill=self.colours["station"], anchor="ls")
+            self.draw.rectangle((0, self.CENTRE_HEIGHT-half_text_height, self.WIDTH, self.CENTRE_HEIGHT+half_text_height), (0, 0, 0))
+        self.draw.text( (text_x, self.CENTRE_HEIGHT-half_text_height), t, font=self.station_font, fill=self.colours["station"], anchor="lt")
 
     def scroll_station_name(self, speed=3):
-        self.station_name_x += int(speed)
-        # Rotate back 
-        if self.station_name_x >= self.station_name_size_x + self.WIDTH:
-            self.station_name_x = 0
-            self.state.get_next_message()
+        with self._lock:
+            self.station_name_x += int(speed)
+            # Rotate back 
+            if self.station_name_x >= self.station_name_size_x + self.WIDTH:
+                self.station_name_x = 0
+                self.state.get_next_message()
 
     def reset_station_name_scroll(self):
-        self.station_name_x = self.WIDTH
+        with self._lock:
+            self.station_name_x = self.WIDTH
 
     def draw_volume_bar(self, volume, max_volume=100, width=160, height=4, x=0, y=0, bar_margin=0):
             """
