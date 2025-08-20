@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class AudioProcessing():
 
-    def __init__(self, sample_rate:int=44100, frame_chunk_size:int=340):
+    def __init__(self, sample_rate:int=44100, frame_chunk_size:int=1535): #340):
         self._max_value=2**16
         
         self.p=pyaudio.PyAudio()
@@ -29,29 +29,39 @@ class AudioProcessing():
         self.channel = alsaaudio.MIXER_CHANNEL_ALL
         self.set_volume(self.volume)
         logger.info("Volume set to %d", self.volume)
-        
+       
 
-    def vol_up(self, vinc:int=2):
-        self.volume+=vinc
-        if self.volume>100:
-            self.volume=100
-        self.set_volume(self.volume)
+    def log_volume(self, level:int, max_steps:int=60) -> int:
+        """
+        Map linear encoder position to logarithmic volume.
+        Uses y = 100 * (x / max)^3 as an approximation for perceptual loudness.
+        """
+        x = level / max_steps           # Normalize to 0-1
+        log_val = max_steps * (x ** 2)  # Cubic curve for logarithmic perception
+        return int(log_val)       
+
+    def vol_up(self, inc:int=2):
+        self.set_volume(vol=self.volume+inc)
         return self.volume        
 
-    def vol_down(self, vinc:int=2):
-        self.volume-=vinc
-        if self.volume<0:
-            self.volume=0
-        self.set_volume(self.volume)
+    def vol_down(self, inc:int=2):
+        self.set_volume(vol=self.volume-inc)
         return self.volume
     
-    def set_volume(self, vol:int):
-        if vol<0:
-            vol=0
-        elif vol>80:
-            vol=80
-        self.volume = vol
-        self.mixer.setvolume(vol, self.channel)
+    def set_volume(self, vol:int=-1, use_log:bool=True):
+        self.volume=vol
+        # Make sure it's in range
+        if self.volume<10:
+            self.volume=10
+        elif self.volume>80:
+            self.volume=80
+
+        actual_vol = self.log_volume(self.volume) if use_log else self.volume
+        if actual_vol<10:
+            actual_vol=10
+        elif actual_vol>80:
+            actual_vol=80
+        self.mixer.setvolume(actual_vol, self.channel)
 
     def start(self):
         '''
@@ -83,6 +93,7 @@ class AudioProcessing():
         
         d=self.stream.read(self.frames_chunk_size, exception_on_overflow=False)
         self.signal=np.frombuffer(d,dtype='int16')
+        logging.debug("Latency %0.3fs Frames avail to read: %d", self.stream.get_input_latency(), self.stream.get_read_available())
         return True
 
     def get_peaks(self) -> tuple[float,float]:
@@ -90,5 +101,6 @@ class AudioProcessing():
         self.ch_r=self.signal[1::2]
         peak_l = np.abs(np.max(self.ch_l))/self._max_value*100.0
         peak_r = np.abs(np.max(self.ch_r))/self._max_value*100.0        
-        logger.debug("Peaks L:%d R:%d", peak_l, peak_r)
+        logger.debug("Peaks L:%0.3f R:%0.3f", peak_l, peak_r)
         return (peak_l, peak_r)
+
