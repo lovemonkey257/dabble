@@ -20,7 +20,8 @@ class Encoder():
                  pin_b:int=27, 
                  pin_c:int=23,
                  button_press_callback=None,
-                 button_position:int=EncoderPosition.LEFT):
+                 button_position:int=EncoderPosition.LEFT,
+                 bounce_time:float=0.1):
 
         self.device_type = device_type
         self.position    = button_position
@@ -53,10 +54,15 @@ class Encoder():
             from gpiozero import Button, RotaryEncoder
             self.device = RotaryEncoder(a=pin_a,b=pin_b,wrap=True,max_steps=180)
             ## TODO: Validate PIN numbers
-            self.button=Button(pin_c, bounce_time=0.2)
+
+            if bounce_time<0:
+                bounce_time=0.1
+            elif bounce_time>1:
+                bounce_time=1
+
+            self.button=Button(pin_c, bounce_time=bounce_time)
             if button_press_callback is not None:
                 logger.info("Button callback set")
-                #self.button.when_pressed = button_press_callback
                 self.button.when_released = button_press_callback
             self.has_led = False
 
