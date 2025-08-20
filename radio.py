@@ -269,7 +269,7 @@ try:
     )
 except exceptions.FontException:
     logging.fatal("Cannot load fonts")
-    shutdown(ui=ui, left_encoder=left_encoder)
+    shutdown(ui=ui,player=player)
     sys.exit()
 
 # Display startup message
