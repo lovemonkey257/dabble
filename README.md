@@ -103,7 +103,7 @@ problems with PAD.
 
 ### `eti-cmdline`
 Dependencies:
-- `sudo apt install libfftw3f-dev libfftw3f libsamplerate0-dev librtlsdr-dev libspdlog-dev nlohmann-json3-dev libboost libboost-dev libfmt-dev libfmt9 jq`
+- `sudo apt install libfftw3-dev libsndfile1-dev libsamplerate0-dev librtlsdr-dev libboost-dev libfmt-dev libfmt9 jq`
 
 Code. Most changes have been accepted upstream (thanks Jvan) so this is probably redundent:
 - `git clone https://github.com/lovemonkey257/eti-stuff.git`
