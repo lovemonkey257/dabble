@@ -83,6 +83,9 @@ sudo raspi-config nonint do_i2c 1
 sudo reboot
 ```
 
+### Build Essentials
+`sudo apt install build-essential cmake`
+
 ### `dablin`
 Dependencies first.
 - `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libgtkmm-3.0-dev libfdk-aac-dev`
@@ -100,7 +103,7 @@ problems with PAD.
 
 ### `eti-cmdline`
 Dependencies:
-- `sudo apt install build-essential cmake libfftw3f-dev libfftw3f libsamplerate0-dev librtlsdr-dev libspdlog-dev nlohmann-json3-dev libboost libboost-dev libfmt-dev libfmt9 jq`
+- `sudo apt install libfftw3f-dev libfftw3f libsamplerate0-dev librtlsdr-dev libspdlog-dev nlohmann-json3-dev libboost libboost-dev libfmt-dev libfmt9 jq`
 
 Code. Most changes have been accepted upstream (thanks Jvan) so this is probably redundent:
 - `git clone https://github.com/lovemonkey257/eti-stuff.git`
