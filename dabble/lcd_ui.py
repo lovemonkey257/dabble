@@ -2,15 +2,23 @@
 import colorsys
 import logging
 import math
+import functools
 from dataclasses import dataclass, field
 from enum import Enum,StrEnum
 from pathlib import Path
+import threading
 
 import numpy as np
 import st7735
 from PIL import Image, ImageDraw, ImageFont
 
-from . import exceptions
+from . import exceptions, menus, encoder
+
+logger = logging.getLogger(__name__)
+
+# Constants
+class Locks:
+    INTERFACE = threading.Lock()
 
 class MessageState(Enum):
     STATION  = 0
@@ -19,29 +27,57 @@ class MessageState(Enum):
 class GraphicState(StrEnum):
     WAVEFORM="waveform"
     GRAPHIC_EQUALISER="graphic_equaliser"
+    GRAPHIC_EQUALISER_BARS="graphic_equaliser_bars"
 
 @dataclass
 class UIState():
+    '''
+    This stores the state of the UI.
+    Changes here are reflected in the UI
+    This should be the only place the UI values are changed
+    '''
     station_name:str     = ""
     ensemble:str         = ""
     last_pad_message:str = ""
+    next_pad_message:str = ""
+    pad_queue:list       = field(default_factory=list)
     audio_format:str     = ""
     genre:str            = ""
+    dab_type:str         = ""
+    current_msg:int      = MessageState.STATION
+
     volume:int           = 40
     peak_l:int           = 0
     peak_r:int           = 0
     signal:np.ndarray    = None
-    levels_enabled:bool  = True
-    dab_type:str         = ""
-    current_msg:int      = MessageState.STATION
-    left_menu_enabled:bool  = False  # If set then menu is being displayed
-    right_menu_enabled:bool = False
-    pulse_left_led_encoder:bool = False
-    pulse_right_led_encoder:bool = False
-    left_led_rgb         = (255,255,255)
-    right_led_rgb        = (255,255,255)
-    visualiser_enabled:bool = True
-    visualiser:GraphicState = GraphicState.GRAPHIC_EQUALISER
+
+    left_encoder:encoder.Encoder   = None
+    right_encoder:encoder.Encoder  = None
+    pulse_left_led_encoder:bool    = False
+    pulse_right_led_encoder:bool   = False
+    left_led_rgb                   = (255,255,255)
+    right_led_rgb                  = (255,255,255)
+
+    radio_state:menus.StateMachine = None
+    current_menu_item:str          = None
+    lm:menus.Menu                  = None # Left Menu
+    rm:menus.Menu                  = None # Right Menu
+    station_timer:threading.Thread = None # Station selection timeout
+    menu_timer:threading.Thread    = None # Menu exit timeout
+
+    visualiser_enabled:bool        = True
+    visualiser:GraphicState        = GraphicState.GRAPHIC_EQUALISER
+    levels_enabled:bool            = True
+    station_enabled:bool           = True
+
+    def update(self, prop, value):
+        '''
+        Allow state to be changed using <obj>.update("prop",value)
+        Means it can be used in lambdas which don't like <obj>.<prop>=<value>
+        Returns new value (as returned by method not value passed which may not be the same)
+        '''
+        setattr(self, prop, value)
+        return getattr(self, prop)
 
     def get_pad_message(self):
         '''
@@ -70,19 +106,27 @@ class UIState():
             self.current_msg = MessageState.LAST_PAD
         elif self.current_msg == MessageState.LAST_PAD:
             self.current_msg = MessageState.STATION
-
+        # get next pad message (dont change mid display, only on rotate)
+        if self.next_pad_message!="":
+            self.last_pad_message=self.next_pad_message
 
 class LCDUI():
+    '''
+    Manage the LCD display and UI
+    '''
     def __init__(self, 
                  base_font_path:str="liberation/LiberationSans",
-                 station_font_size:int=19, 
+                 station_font_size:int=18, 
                  station_font_style:str="Regular",
                  ensemble_font_size:int=13,
                  ensemble_font_style:str="Regular",
-                 menu_font_size:int=19,
-                 menu_font_style:str="Regular",
+                 menu_font_size:int=20,
+                 menu_font_sml_size:int=17,
+                 menu_font_style:str="Bold",
                  dc_gpio:str="GPIO9",
                  backlight_gpio:str="GPIO16"):
+
+        self._lock = Locks.INTERFACE
 
         # Create ST7735 LCD display class. Taken from Pimoroni docs
         # 160 x 80 full colour
@@ -114,15 +158,15 @@ class LCDUI():
         self.font_dir=Path("/usr/share/fonts/truetype/")
         self.base_font = base_font_path
 
-        self.station_font_file  = self.get_font_path(station_font_style.capitalize())
-        self.ensemble_font_file = self.get_font_path(ensemble_font_style.capitalize())
-        self.menu_font_file     = self.get_font_path(menu_font_style.capitalize())
+        self.station_font_file  = self.get_font_path(station_font_style)
+        self.ensemble_font_file = self.get_font_path(ensemble_font_style)
+        self.menu_font_file     = self.get_font_path(menu_font_style)
 
         try:
             self.station_font    = ImageFont.truetype(self.station_font_file, station_font_size)
             self.ensemble_font   = ImageFont.truetype(self.ensemble_font_file, ensemble_font_size)
-            self.menu_font       = ImageFont.truetype(self.menu_font_file, menu_font_size)
-            self.menu_title_font = ImageFont.truetype(self.menu_font_file, menu_font_size-2)
+            self.menu_sel_font   = ImageFont.truetype(self.menu_font_file, menu_font_size)
+            self.menu_sml_font   = ImageFont.truetype(self.menu_font_file, menu_font_sml_size)
         except OSError as e:
             logging.error("Cannot load font: %s", self.base_font)
             raise exceptions.FontException
@@ -130,14 +174,22 @@ class LCDUI():
         self.station_name_x      = self.WIDTH 
         self.station_name_size_x = 0
 
+        # TODO: Do we do themes???
         self.colours = {
-            "ensemble": '#B8B814', # (251, 80, 18),
-            "station":  '#FEFE33', # (255, 10,10),
-            "menu":     '#00FF00', # (0, 255, 0),
-            "volume":   '#EFD4F7', # (203, 186, 237),
-            "volume_bg": (0, 102, 0),
-            "equaliser_line": 'darkviolet',
-            "equaliser_dot":  'deepskyblue'
+            #"station":  '#FEFE33', 
+            "station":  '#FFB703', 
+            #"ensemble": '#B8B814', 
+            "ensemble": '#023047', 
+            "menu":     '#24D111', 
+            "menu_sml": '#0B4205', 
+            #"volume":   '#EFD4F7',
+            "volume":   '#8ECAE6',
+            #"volume_bg": (0, 102, 0),
+            "volume_bg": '#023047',
+            #"equaliser_line": 'darkviolet',
+            #"equaliser_dot":  'deepskyblue'
+            "viz_line": '#126782',
+            "viz_dot":  '#8ECAE6'
         }
         self.last_l_level     = 0
         self.last_r_level     = 0
@@ -147,51 +199,86 @@ class LCDUI():
         self.state            = UIState()
 
     def get_font_path(self, style):
-        return str(self.font_dir  / f'{self.base_font}-{style}.ttf')
+        fp=str(self.font_dir  / f'{self.base_font}-{style}.ttf')
+        logging.info("Font path: %s", fp)
+        return fp
    
 
-    def draw_interface(self, reset_scroll=False):
+    def draw_interface(self, reset_scroll=False, dim_screen=True, draw_centre_lines:bool=False):
         '''
         Draw the entire interface
-        '''
-        if self.state.left_menu_enabled or self.state.right_menu_enabled:
-            # Menu displayed
-            self.clear_screen()
-            self.draw_menu("Graphic Equaliser", title="Visualisations")
 
-        else:
+        TODO: Fix positions - make them clearer!? Changing one screws the others particularly when
+              having to clear portions of the screen and bits are disabled (which then don't get 
+              cleared!)
+
+        '''
+        with self._lock:
             # Normal display
-            clear_sn = not self.state.visualiser_enabled
+
+            # If we have no vis OR no signals then make sure we clear the station name area or
+            # we will get smudges
+            clear_sn = not self.state.visualiser_enabled or (self.state.peak_l==0 and self.state.peak_r==0)
+
             if reset_scroll:
                 self.reset_station_name_scroll()
 
             if self.state.visualiser_enabled:
                 if self.state.visualiser == GraphicState.GRAPHIC_EQUALISER:
-                    self.graphic_equaliser(self.state.signal, base_y=31, height=35)
+                    self.graphic_equaliser(self.state.signal, base_y=28, height=35)
+                elif self.state.visualiser == GraphicState.GRAPHIC_EQUALISER_BARS:
+                    self.graphic_equaliser_bars(self.state.signal, base_y=28, height=35)
                 elif self.state.visualiser == GraphicState.WAVEFORM:
-                    self.waveform(self.state.signal, base_y=31, height=35)
-            if self.state.levels_enabled:
-                self.levels(self.state.peak_l, self.state.peak_r) 
-            else:
-                self.clear_levels()
+                    self.waveform(self.state.signal, base_y=28, height=35)
 
-            self.draw_station_name(self.state.get_current_message(), clear=clear_sn)
-            self.draw_volume_bar(self.state.volume, x=0,y=self.HEIGHT-30, height=2)   
+            if not self.state.levels_enabled:
+                self.clear_levels()
+            else:
+                self.draw_levels(self.state.peak_l, self.state.peak_r)
+
+            vol_bar_y = self.HEIGHT - 27
+
+            if self.state.station_enabled or self.state.radio_state.selecting_a_station.is_active:
+                self.draw_station_name(self.state.get_current_message(), clear=clear_sn)
+            else:
+                self.draw_station_name(" ", clear=clear_sn)
+
+            self.draw_volume_bar(self.state.volume, x=0,y=vol_bar_y, height=4)   
             self.draw_ensemble(self.state.ensemble, clear=True)
             self.draw_dab_type(self.state.dab_type, clear=True)
 
-        self.update()
+            if draw_centre_lines:
+                self.draw.line((self.CENTRE_WIDTH, 0, self.CENTRE_WIDTH, self.HEIGHT),  fill='gray')
+                self.draw.line((0, self.CENTRE_HEIGHT, self.WIDTH, self.CENTRE_HEIGHT), fill='gray')
+
+            # Draw menu over dimmed image
+            dimmed_image=None
+            if self.state.radio_state.left_menu_activated.is_active or \
+               self.state.radio_state.right_menu_activated.is_active or \
+               self.state.radio_state.selecting_a_menu.is_active:
+                dimmed_image= Image.eval(self.img, lambda x: x/3)
+                self.draw_menu(draw=ImageDraw.Draw(dimmed_image))
+
+            self.update(img=dimmed_image)
 
 
-    def update(self):
-        self.disp.display(self.img)
+    def update(self,img=None):
+        if img is None:
+            self.disp.display(self.img)
+        else:
+            self.disp.display(img)
 
+    def _get_text_hw_and_bb(self, t:str, font=None):
+        '''
+        Get boundingbox, text height and width give text str and font
+        '''
+        (x1,y1,x2,y2) = font.getbbox(t)
+        text_height = abs(y2 - y1)
+        text_width  = self.draw.textlength(t, font=font)
+        return (x1,y1,x2,y2,text_height,text_width)
 
-    def clear_screen(self, draw_center_lines:bool=False):
+    def clear_screen(self):
         self.draw.rectangle((0, 0, self.WIDTH, self.HEIGHT), (0, 0, 0))
-        if draw_center_lines:
-            self.draw.line((self.WIDTH//2,0,self.WIDTH//2,self.HEIGHT), fill='gray')
-            self.draw.line((0,self.HEIGHT//2,self.WIDTH,self.HEIGHT//2), fill='gray')
 
     def show_startup(self):
         self.clear_screen()
@@ -203,8 +290,9 @@ class LCDUI():
         # Clear the top part of the screen
         self.draw.rectangle((0,1,self.WIDTH,6), (0, 0, 0))
 
-    def levels(self,l,r):
+    def draw_levels(self, l:int, r:int, decay:int=2):
         c=self.WIDTH/2
+        # logger.info("%d %d",l,r)
         lx1=c-l
         lx2=c+l
         rx1=c-r
@@ -220,78 +308,109 @@ class LCDUI():
 
         if l>self.last_max_l_level:
             self.last_max_l_level=l
+
         if self.last_max_l_level>0:
-            self.draw.point((c+self.last_max_l_level,1),fill='blue')
-            self.draw.point((c-self.last_max_l_level,1),fill='blue')
+            self.draw.point((c+self.last_max_l_level,1),fill=self.colours['viz_dot'])
+            self.draw.point((c-self.last_max_l_level,1),fill=self.colours['viz_dot'])
             self.last_max_l_level -= 2
 
         if r>self.last_max_r_level:
             self.last_max_r_level=r
+
         if self.last_max_l_level>0:
-            self.draw.point((c+self.last_max_r_level,6),fill='blue')
-            self.draw.point((c-self.last_max_r_level,6),fill='blue')
+            self.draw.point((c+self.last_max_r_level,6),fill=self.colours['viz_dot'])
+            self.draw.point((c-self.last_max_r_level,6),fill=self.colours['viz_dot'])
             self.last_max_r_level -= 2
-    
 
-    def _get_text_hw_and_bb(self, t:str, font=None):
-        '''
-        Get boundingbox, text height and width give text str and font
-        '''
-        (x1,y1,x2,y2) = font.getbbox(t)
-        text_height = y2 - y1
-        text_width  = self.draw.textlength(t, font=font)
-        return (x1,y1,x2,y2,text_height,text_width)
-    
-
-    def draw_ensemble(self, t:str, clear:bool=False):
-        (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
-        text_w = self.WIDTH//2
+    def draw_ensemble(self, t:str, clear:bool=True):
+        (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.ensemble_font)
+        split_point = self.WIDTH//4*3
         if clear:
-            self.draw.rectangle((0,self.HEIGHT-(y2-y1)-12, text_w, self.HEIGHT), (0, 0, 0))
-        self.draw.text( (0,self.HEIGHT-2), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
+            self.draw.rectangle((0,self.HEIGHT-text_height-4, split_point, self.HEIGHT), (0, 0, 0))
+        self.draw.text( (0,self.HEIGHT), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
 
-
-    def draw_dab_type(self, t:str, clear:bool=False):
-        (x1,y1,x2,y2) = self.ensemble_font.getbbox(t)
-        text_w = self.draw.textlength(t, font=self.ensemble_font)
+    def draw_dab_type(self, t:str, clear:bool=True):
+        if t=="" or t is None:
+            t="DAB"
+        (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.ensemble_font)
+        split_point = self.WIDTH//4*3
         if clear:
-            self.draw.rectangle((self.WIDTH//2,self.HEIGHT-(y2-y1)-16, self.WIDTH, self.HEIGHT), (0, 0, 0))
-        self.draw.text( (self.WIDTH-text_w,self.HEIGHT-2), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
+            self.draw.rectangle((split_point,self.HEIGHT-text_height-4, self.WIDTH, self.HEIGHT), (0, 0, 0))
+        self.draw.text( (self.WIDTH,self.HEIGHT), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="rd")
 
 
-    def draw_menu(self, t:str, title:str=""):
-        (_,t_y1,_,t_y2,title_text_height,title_text_width) = self._get_text_hw_and_bb(title, font=self.menu_title_font)
-        self.draw.text( (1,1), title, font=self.menu_title_font, fill=self.colours["menu"])# , anchor="ls")
+    def draw_menu(self, draw=None):
+        draw = self.draw if draw is None else draw
 
-        (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.menu_font)
-        text_x = 10
-        text_y = t_y2 
-        self.draw.text( (text_x, text_y), t, font=self.menu_font, fill=self.colours["menu"]) #, anchor="ls")
+        menu_id      = self.state.current_menu_item.menu_id
+        display_text = self.state.current_menu_item.dstate()
+
+        (x1,y1,x2,y2,cm_height,cm_width) = self._get_text_hw_and_bb(display_text, font=self.menu_sel_font)
+        half_text_height = cm_height // 2
+
+        x=0
+        anchor="lt"
+        menu_list=[]
+        if self.state.radio_state.left_menu_activated.is_active or \
+           self.state.radio_state.selecting_a_menu.is_active:
+            anchor="lm"
+            x=5
+            menu_list=self.state.lm.menu_list 
+            i=self.state.lm.menu_index
+        elif self.state.radio_state.right_menu_activated.is_active or \
+           self.state.radio_state.selecting_a_menu.is_active:
+            anchor="rm"
+            x=self.WIDTH
+            menu_list=self.state.rm.menu_list 
+            i=self.state.rm.menu_index
+
+        # Get next/prev menu item to display
+        if menu_list:
+            prev_menu = menu_list[i-1].dstate() if i>0 else menu_list[-1].dstate()
+            next_menu = menu_list[i+1].dstate() if i<len(menu_list)-1 else menu_list[0].dstate()
+
+            #draw.arc((-30, 0, 30, self.HEIGHT), start=270, end=90, fill="darkgrey")
+            draw.line((0, 0, 0, self.HEIGHT), width=1, fill="darkgrey")
+            draw.text( (x, self.CENTRE_HEIGHT-cm_height), prev_menu, font=self.menu_sml_font, fill=self.colours["menu_sml"], anchor='lm')
+            draw.text( (x, self.CENTRE_HEIGHT), display_text, font=self.menu_sel_font, fill=self.colours["menu"], anchor=anchor)
+            draw.text( (x, self.CENTRE_HEIGHT+cm_height), next_menu, font=self.menu_sml_font, fill=self.colours["menu_sml"], anchor='lm')
        
 
     def draw_station_name(self, t:str, clear:bool=False):
-        if t is None:
+        if t is None or t=="":
             t=" "
 
-        (x1,y1,x2,y2) = self.station_font.getbbox(t)
-        self.station_name_size_x = self.draw.textlength(t, font=self.station_font)
-        text_height = y2 - y1
         # Calc text x with scroll factor
         text_x = self.WIDTH - self.station_name_x
-        text_y = self.CENTRE_HEIGHT - text_height
+
+        (x1,y1,x2,y2) = self.draw.textbbox( (text_x,self.CENTRE_HEIGHT), t,font=self.station_font,anchor="lm")
+        text_width  = self.draw.textlength(t, font=self.station_font)
+        text_height = abs(y2-y1)
+        if text_height==0:
+            text_height=14
+        half_th = text_height // 2
+        self.station_name_size_x = text_width
+
         if clear:
-            self.draw.rectangle((0,text_y, self.WIDTH, text_y + text_height), (0, 0, 0))
-        self.draw.text( (text_x, self.CENTRE_HEIGHT), t, font=self.station_font, fill=self.colours["station"], anchor="ls")
+            #self.draw.rectangle((0,y1,self.WIDTH,y2+4), (0, 0, 0))
+            # Viz is 35 pixels high starting at 28
+            self.draw.rectangle((0,self.HEIGHT-28-35,self.WIDTH,self.HEIGHT-28), (0, 0, 0))
+        self.draw.text( (text_x, self.CENTRE_HEIGHT), t, font=self.station_font, fill=self.colours["station"], anchor="lm")
+
 
     def scroll_station_name(self, speed=3):
-        self.station_name_x += int(speed)
-        # Rotate back 
-        if self.station_name_x >= self.station_name_size_x + self.WIDTH:
-            self.station_name_x = 0
-            self.state.get_next_message()
+        with self._lock:
+            self.station_name_x += int(speed)
+            # Rotate back 
+            if self.station_name_x >= self.station_name_size_x + self.WIDTH:
+                self.station_name_x = 0
+                self.state.get_next_message()
+
 
     def reset_station_name_scroll(self):
-        self.station_name_x = self.WIDTH
+        with self._lock:
+            self.station_name_x = self.WIDTH
+
 
     def draw_volume_bar(self, volume, max_volume=100, width=160, height=4, x=0, y=0, bar_margin=0):
             """
@@ -316,6 +435,7 @@ class LCDUI():
     def scale_log(self, c, f):
         return c * math.log(float(1 + f),10);
 
+
     def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=False):
         '''
         Show frequencies using fft
@@ -329,7 +449,7 @@ class LCDUI():
         mono_signal = (signal[0::2] + signal[1::2]) / 2
 
         # FFT magic
-        fft_mag   = np.abs(np.fft.rfft(mono_signal))
+        fft_mag = np.abs(np.fft.rfft(mono_signal))
         max_mag = np.max(fft_mag)
         if max_mag==0.0:
             return
@@ -360,14 +480,65 @@ class LCDUI():
             else:
                 y1 = int(f * scale)
 
-            self.draw.line( ( i, self.HEIGHT - base_y, i , self.HEIGHT - y1 - base_y), fill=self.colours['equaliser_line'])
-            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.colours['equaliser_dot'])
+            self.draw.line( ( i, self.HEIGHT - base_y, i , self.HEIGHT - y1 - base_y), fill=self.colours['viz_line'])
+            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.colours['viz_dot'])
 
             if y1 > self.last_max_signal[i]:
                 self.last_max_signal[i] = y1
 
             if self.last_max_signal[i]>0:
-                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill='white')
+                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill=self.colours['viz_dot'])
+                self.last_max_signal[i] -= fall_decay
+
+
+    def graphic_equaliser_bars(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=True, num_bars:int=32):
+        '''
+        Show frequencies using fft, grouped into num_bars (default 10) bins.
+        '''
+        if signal is None:
+            return
+        if width == 0:
+            width = self.WIDTH
+
+        # Convert to mono (average l/r channels)
+        mono_signal = (signal[0::2] + signal[1::2]) / 2
+
+        # FFT magic
+        fft_mag = np.abs(np.fft.rfft(mono_signal))
+        max_mag = np.max(fft_mag)
+        if max_mag == 0.0:
+            return
+
+        # Calc scale
+        scale: float = float(height) / max_mag
+
+        # Bin the FFT magnitudes into num_bars
+        bin_size = len(fft_mag) // num_bars
+        bar_width = width // num_bars
+
+        # Clear area
+        self.draw.rectangle((0, self.HEIGHT - height - base_y, self.WIDTH, self.HEIGHT - base_y), fill="black")
+
+        for i in range(num_bars):
+            start = i * bin_size
+            end = start + bin_size
+            if end > len(fft_mag):
+                end = len(fft_mag)
+            # Aggregate magnitude within the bin (mean or max)
+            #bar_value = np.mean(fft_mag[start:end])
+            bar_value = np.max(fft_mag[start:end])
+            bar_height = int(bar_value * scale)
+            x1 = i * bar_width
+            x2 = x1 + bar_width - 2
+
+            # Draw the bar (rectangle)
+            self.draw.rectangle([x1, self.HEIGHT - base_y - bar_height, x2, self.HEIGHT - base_y], fill=self.colours['viz_line'])
+
+            if bar_height > self.last_max_signal[i]:
+                self.last_max_signal[i] = bar_height
+
+            if self.last_max_signal[i]>0:
+                self.draw.line([x1, self.HEIGHT - base_y - self.last_max_signal[i], x2, self.HEIGHT - base_y - self.last_max_signal[i]], fill=self.colours['viz_dot'])
                 self.last_max_signal[i] -= fall_decay
 
 
@@ -397,16 +568,14 @@ class LCDUI():
         for i in range(1,end_range,step):
             y1 = int(mono_signal[i] * scale)
             y2 = int(mono_signal[i+step] * scale)
-            self.draw.line( ( i, self.HEIGHT-y1-base_y, i+step , self.HEIGHT-y2-base_y), fill=self.colours['equaliser_dot'])
-            self.draw.line( ( i, self.HEIGHT-base_y, i , self.HEIGHT-y1-base_y), fill=self.colours['equaliser_line'])
-            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill='white')
+            self.draw.line( ( i, self.HEIGHT-y1-base_y, i+step , self.HEIGHT-y2-base_y), fill=self.colours['viz_line'])
+            self.draw.line( ( i, self.HEIGHT-base_y, i , self.HEIGHT-y1-base_y), fill=self.colours['viz_line'])
+            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.colours['viz_dot'])
 
             if y1 > self.last_max_signal[i]:
                 self.last_max_signal[i] = y1
 
             if self.last_max_signal[i]>0:
-                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill='white')
+                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill=self.colours['viz_dot'])
                 self.last_max_signal[i] -= fall_decay
-
-
 
