@@ -65,12 +65,12 @@ def shutdown(ui=None,kb=None,player=None):
         player.stop()
         time.sleep(1)
         
-    if ui.state.left_encoder:
-        ui.state.left_encoder.set_colour_by_rgb((0,0,0))
     if kb:
         kb.reset()
 
     if ui:
+        if ui.state.left_encoder:
+            ui.state.left_encoder.set_colour_by_rgb((0,0,0))
         ui.clear_screen()
         ui.update()
         ui.disp.display_off()
