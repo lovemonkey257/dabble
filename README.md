@@ -122,7 +122,7 @@ As this needs system installed packages create requirements as follows:
 To install:
 - `sudo apt install python3-alsaaudio python3-pyaudio`
 - Create venv `pip -mvenv venv`
-- Edit ./venv/pyvenv.cfg and ensure `include-system-site-packages` is `true`
+- Edit `./venv/pyvenv.cfg` and ensure `include-system-site-package` is `true`
 - `pip install -r requirements.txt`
 
 ## Config
@@ -148,10 +148,19 @@ be exposed?
 - `source ./venv/bin/activate`
 - `python radio.py`
 
-## Use
-To simulate menus use these keypresses:
+### Left Encoder
+By default will select a station. Currently once a station is selected it will be used if left
+for 4 seconds. This feels more intuitive than then having to press the button to select.
 
-- Scanning: press `S`
-- Change visualiser: Press `g` for graphic equaliser, `w` for waveform
+Press the button to bring up the menu which allows you to change a number of display settings
+such as Equaliser type, Station on/off, Levels on/off.
+
+### Right Encoder
+By default will change the volume. This is based on a log scale which feels better than
+linear.
+
+Press the button to bring up the menu to allow you to initiate a scan. It doesn't do much
+else at the moment.
+
 
 
