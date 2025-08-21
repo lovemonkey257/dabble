@@ -6,8 +6,29 @@ This project is targetted to be run on a Raspberry Pi running Raspberry OS (this
 ## Current progress and Features
 - Forked and fixed dablin cli to output PAD announcements e.g. now playing
 - UI seems stable
-- Using Adafruit speakerbonnet/amp. While audio works fine it seems the MAX98357A doesnt allow audio capture so waveforms etc not displayed. Need to see if I can make Alsa play nice with loopback? Seems that Alsa is 90% magic and 10% weirdness. 
+- The Adafruit speakerbonnet/amp works fine now and can capture audio
 - Two encoders work
+
+## Capture Audio from Adafruit Speaker Bonnet
+The driver for the speaker bonnet does not present a recording interface - its playback only. This
+is a problem for me as I sample the sound to display the visualiser.
+
+Using ALSA and any advice on capturing sound didn't work for me. Even AI gave up so I did it the
+old fashioned way and figured-it-out-myself. It took a while...
+
+I've created a script `init-sound-system.sh` to do this but it uses ALSA loopback and some 
+pulseaudio magic (which apparantly is how the Linux Sound sub-systems work).
+
+This is what I had to do and it works:
+
+- Load the ALSA loop back driver `sudo modprobe snd-aloop pcm_substreams=1`
+- Define the source (from `pactl list short`) `SRC=alsa_output.platform-soc_107c000000_sound.stereo-fallback.monitor`
+- Define the sink i.e. loopback `SINK=alsa_output.platform-snd_aloop.0.analog-stereo`
+- Link them together `pactl load-module module-loopback source=$SRC sink=$SINK`
+
+Anything played through the Bonnet is now fed back into the loopback sink which you can then capture
+sound from. I found that the SDL sub-system picked this up automatically and I didn't need to set
+`AUDIODEV`.
 
 ### Features
 - DAB and DAB+ reception
