@@ -21,7 +21,16 @@ class AudioProcessing():
         self.sample_rate = sample_rate
         self.frames_chunk_size = frame_chunk_size # 160*4 #512
 
-        self.mixer = alsaaudio.Mixer()
+        try:
+            # ALSA naming nightmare. Please pick sensible defaults...
+            # Try PCM
+            logger.info("Trying PCM Mixer")
+            self.mixer = alsaaudio.Mixer('PCM')
+        except alsaaudio.ALSAAudioError as e:
+            logger.info("Nope. Trying Default Mixer")
+            # Try "default" whatever it is
+            self.mixer = alsaaudio.Mixer()
+
         self.volume=2
         self.ch_l = None
         self.ch_r = None
