@@ -131,6 +131,7 @@ class LCDUI():
         # Create ST7735 LCD display class. Taken from Pimoroni docs
         # 160 x 80 full colour
         # Be mindful of GPIO use when using other devices
+        logging.info("Initialising LCD display")
         self.disp = st7735.ST7735(
             port=0,
             cs=0,
