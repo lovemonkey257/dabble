@@ -101,6 +101,9 @@ Ensure Raspberry Pi has SPI and I2C enabled in config
 ```
 sudo raspi-config nonint do_spi 1
 sudo raspi-config nonint do_i2c 1
+
+# If using lite so no GUI etc ensure pipewire-pulse installed:
+sudo apt install -y pipewire-pulse
 sudo reboot
 ```
 
