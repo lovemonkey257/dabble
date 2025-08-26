@@ -124,7 +124,7 @@ class LCDUI():
                  menu_font_sml_size:int=17,
                  menu_font_style:str="Bold",
                  dc_gpio:str="GPIO9",
-                 backlight_gpio:str="GPIO16"):
+                 backlight_gpio:str="GPIO26"):
 
         self._lock = Locks.INTERFACE
 
