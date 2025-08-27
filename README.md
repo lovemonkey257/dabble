@@ -9,6 +9,19 @@ This project is targetted to be run on a Raspberry Pi running Raspberry OS (this
 - The Adafruit speakerbonnet/amp works fine now and can capture audio
 - Two encoders work
 
+## Components
+- Raspberry Pi 5. I tried the Pi Zero 2 but the speaker bonnet and ALSA/Pulseaudio did not play nicely. I'll come back to this.
+- [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
+- 2 x [Fermion EC11 encoders](https://thepihut.com/products/fermion-ec11-rotary-encoder-module-breakout). These work well and I'm using these instead of the pretty one.
+- 1 x [Adafruit Speaker Bonnet](https://www.adafruit.com/product/3346). Can use 3W 8Ohm speakers which should be powerful enough
+- NESDR Nano 2+ (but any RTLSDR should do)
+- No idea about an enclosure yet. Will prototype it in thin MDF
+
+## Software
+- UI and controller written in python
+- Modified version of of eti-cmdline from JvanKatwijk to enable scans. Forked here https://github.com/lovemonkey257/eti-stuff
+- Modified version of dablin from Opendigialradio so I can get PAD messages in cli version, https://github.com/lovemonkey257/dablin
+
 ## Capture Audio from Adafruit Speaker Bonnet
 The driver for the speaker bonnet does not present a recording interface - its playback only. This
 is a problem for me as I sample the sound to display the visualiser.
@@ -22,7 +35,7 @@ pulseaudio magic (which apparantly is how the Linux Sound sub-systems work).
 This is what I had to do and it works:
 
 - Load the ALSA loop back driver `sudo modprobe snd-aloop pcm_substreams=1`
-- Define the source (from `pactl list short`) `SRC=alsa_output.platform-soc_107c000000_sound.stereo-fallback.monitor`
+- Define the source (from `pactl list sources short`) `SRC=alsa_output.platform-soc_107c000000_sound.stereo-fallback.monitor`
 - Define the sink i.e. loopback `SINK=alsa_output.platform-snd_aloop.0.analog-stereo`
 - Link them together `pactl load-module module-loopback source=$SRC sink=$SINK`
 
@@ -36,6 +49,7 @@ sound from. I found that the SDL sub-system picked this up automatically and I d
 - Ensemble displayed and DAB type
 - Waveform visualiser works
 - Graphic equaliser works
+- Bar Graphic equaliser works
 
 ![alt text](docs/playing.png)
 ![alt text](docs/waveform.png)
@@ -44,14 +58,15 @@ sound from. I found that the SDL sub-system picked this up automatically and I d
 
 ![alt text](docs/pad-msg.png)
 
+- Menus work
+- Volume works using log scale (seems more natural)
 - Station selection works
-- Volume control works
 - Station scanning works, although need to decide how to handle default list of channels to scan
-- Also captures audio format but not currently displayed
+- Also captures audio format and genre but not currently displayed
 
 ## Current problems:
-- Will need a menu system (using encoders) to nav settings etc
 - Proper build perhaps into containers
+- Enclosure
 
 ## Possibly menu system
 Two encoders (left, right) both with built in buttons. We have four entry techniques: twist to search, button to select.
@@ -62,59 +77,66 @@ On click:
 - List of Visualisations:
     - Graphic Equaliser
     - Waveform
+    - Bar Graphic Equaliser
     - Levels On/Off
     - Visualiser On/Off
+    - Station name On/Off
 
 - Select and click (if off will enable it)
-- If nothing selected revert to play screen
+- If nothing selected revert to play screen after a few seconds
 
 ### Right Encoder
 Default - Station select. No button needed to select?
 On click:
 - Menu options displayed:
+    - Scan
     - Themes? 
     - Country/Language?? Selects ensemble channels
     - Possibly more
 - If nothing selected for more than 5 secs revert to play screen
 
 ## Ideas
-- Want to stream to airplay/chromecast?? 
 - Turn this into a mini streamer e.g. run shareport-sync et al?
 
-## Components
-- PI3 or greater. I'm currently using a PI5 which is probably overkill. Will probably try a Pi Zero W but memory is a little tight.
-- [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
-- 1 x [LED encoders](https://shop.pimoroni.com/products/rgb-encoder-breakout) although I may change these to ones that include a button. But LEDS.... But switch!! Shame LED ones don't have a switch.
-- 2 x [Fermion EC11 encoders](https://thepihut.com/products/fermion-ec11-rotary-encoder-module-breakout). These work well and I'm using these instead of the pretty one.
-- 1 x [Adafruit Speaker Bonnet](https://www.adafruit.com/product/3346). Can use 3W 8Ohm speakers which should be powerful enough
-- RTLSDR (a cheap one will probably do, I'm using an official RTL-SDR.com v3). Move to Nano RTLSDR
-- No idea about an enclosure yet. Will prototype it in thin MDF
+# Build
+Install Raspberry Pi Lite, no GUI needed, minimal install.
 
-## Software
-- UI and controller written in python
-- Modified version of of eti-cmdline from JvanKatwijk. Forked here https://github.com/lovemonkey257/eti-stuff
-- Modified version of dablin from Opendigialradio, https://github.com/lovemonkey257/dablin
+Building custom `dablin` and `eti-cmdline` needs thought as the build dependencies
+add unnecessary bloat. 
 
-## Build
-Ensure Raspberry Pi has SPI and I2C enabled in config
+## Base config
+Ensure Raspberry Pi has SPI and I2C enabled in config. i2s-mmap makes sound
+more efficient. Also turn off internal Audio (snd_bcm2935) so bonnet is primary 
+output.
 
+`/boot/firmware/config.txt` 
 ```
+dtparam=i2c_arm=on
+dtparam=i2s=on
+dtparam=spi=on
+dtparam=audio=off
+
+dtoverlay=vc4-kms-v3d,noaudio
+dtoverlay=max98357a
+dtoverlay=i2s-mmap
+```
+
 sudo raspi-config nonint do_spi 1
 sudo raspi-config nonint do_i2c 1
 
-# If using lite so no GUI etc ensure pipewire-pulse installed:
+* If using lite so no GUI etc ensure pipewire-pulse installed:*
 sudo apt install -y pipewire-pulse
 sudo reboot
 ```
 
-### Build Essentials
+## Build Essentials
 `sudo apt install build-essential cmake`
 
-### `dablin`
+## `dablin`
 Dependencies first.
 - `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libgtkmm-3.0-dev libfdk-aac-dev`
 
-Now the code (assumes using my fork. Hopefully they may include my PR):
+Now the code (assumes using my fork. Hopefully they may merge in my PR):
 - `sudo apt remove dablin`
 - `git clone https://github.com/lovemonkey257/dablin.git`
 - `cd dablin`
@@ -125,7 +147,7 @@ Note that dablin will be installed in /usr/local/bin/. System installed
 version is in /usr/bin. Check you've removed system version if you have
 problems with PAD.
 
-### `eti-cmdline`
+## `eti-cmdline`
 Dependencies:
 - `sudo apt install libfftw3-dev libsndfile1-dev libsamplerate0-dev librtlsdr-dev libboost-dev libfmt-dev libfmt9 jq`
 
@@ -138,7 +160,7 @@ Code. Most changes have been accepted upstream (thanks Jvan) so this is probably
 
 This should put `eti-cmdline-rtlsdr` into `/usr/local/bin`
 
-### Python
+## Python
 As this needs system installed packages create requirements as follows:
 
 `pip list --not-required --format=freeze -l > requirements.txt`
@@ -170,6 +192,7 @@ be exposed?
 ## Running
 - cd into your dev dir
 - `source ./venv/bin/activate`
+- `./init-sound-system.sh`
 - `python radio.py`
 
 ### Left Encoder
