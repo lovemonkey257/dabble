@@ -110,6 +110,7 @@ more efficient. Also turn off internal Audio (snd_bcm2935) so bonnet is primary
 output.
 
 `/boot/firmware/config.txt` 
+
 ```
 dtparam=i2c_arm=on
 dtparam=i2s=on
@@ -121,10 +122,13 @@ dtoverlay=max98357a
 dtoverlay=i2s-mmap
 ```
 
+```
 sudo raspi-config nonint do_spi 1
 sudo raspi-config nonint do_i2c 1
+```
 
 * If using lite so no GUI etc ensure pipewire-pulse installed:*
+```
 sudo apt install -y pipewire-pulse
 sudo reboot
 ```
