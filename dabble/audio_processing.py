@@ -21,6 +21,7 @@ class AudioProcessing():
         self.sample_rate = sample_rate
         self.frames_chunk_size = frame_chunk_size # 160*4 #512
 
+        '''
         try:
             # ALSA naming nightmare. Please pick sensible defaults...
             # Try PCM
@@ -29,7 +30,8 @@ class AudioProcessing():
         except alsaaudio.ALSAAudioError as e:
             logger.info("Nope. Trying Default Mixer")
             # Try "default" whatever it is
-            self.mixer = alsaaudio.Mixer()
+        '''
+        self.mixer = alsaaudio.Mixer()
 
         self.volume=2
         self.ch_l = None
@@ -102,7 +104,7 @@ class AudioProcessing():
         
         d=self.stream.read(self.frames_chunk_size, exception_on_overflow=False)
         self.signal=np.frombuffer(d,dtype='int16')
-        logging.debug("Latency %0.3fs Frames avail to read: %d", self.stream.get_input_latency(), self.stream.get_read_available())
+        # logging.debug("Latency %0.3fs Frames avail to read: %d", self.stream.get_input_latency(), self.stream.get_read_available())
         return True
 
     def get_peaks(self) -> tuple[float,float]:
@@ -110,6 +112,6 @@ class AudioProcessing():
         self.ch_r=self.signal[1::2]
         peak_l = np.abs(np.max(self.ch_l))/self._max_value*100.0
         peak_r = np.abs(np.max(self.ch_r))/self._max_value*100.0        
-        logger.debug("Peaks L:%0.3f R:%0.3f", peak_l, peak_r)
+        # logger.debug("Peaks L:%0.3f R:%0.3f", peak_l, peak_r)
         return (peak_l, peak_r)
 
