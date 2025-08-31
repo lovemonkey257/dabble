@@ -170,8 +170,12 @@ This should put `eti-cmdline-rtlsdr` into `/usr/local/bin`
 ## Test Radio by Scanning
 
 - Ensure RTL device and audio are set up.
-- `eti-cmdline-rtlsdr -J -x`
-- FINISH THIS
+- Test eti-cmdline can see USB RTL and dump some station params: `eti-cmdline-rtlsdr -J -x`
+- Acid test. Play a station `dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c 11D -s 0xc0c6 -I`
+
+Note the channel (11D) and station (0xc0c6) are the params for Magic Radio in the UK. Depending
+on your location you will need to tweak these. I'm trying to find sources based on country but
+that is for later on, sorry.
 
 ## Dabble
 As this needs system installed packages create requirements as follows:
@@ -203,6 +207,11 @@ Saved state is saved into `dabble_radio.json" e.g.
 ```
 TODO: What else might need external configuration? Other config settings that should
 be exposed?
+
+## Font
+Install font from https://fonts.google.com/share?selection.family=Noto+Sans:ital,wght@0,100..900;1,100..900 into /usr/share/fonts/truetype/
+
+The zip installs under a dir called `static` which you should rename to `noto`.
 
 ## Running
 - cd into your dev dir
