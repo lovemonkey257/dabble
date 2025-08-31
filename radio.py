@@ -14,48 +14,11 @@ from enum import Enum
 from pathlib import Path
 
 from dabble import (audio_processing, encoder, exceptions, keyboard, lcd_ui,
-                    radio_player, radio_stations, menus)
-
-config_path = Path("dabble_radio.json")
-
-def load_state(state:lcd_ui.UIState):
-    logger.info(f'Loading saved state from {config_path}')
-    config=dict()
-    if config_path.exists():
-        with open(config_path, "r") as f:
-            config = json.load(f)
-            state.volume = config['volume']
-            state.station_name = config['station_name']
-            state.ensemble = config['ensemble']
-            state.visualiser_enabled = config['enable_visualiser']
-            state.visualiser = config['visualiser']
-            state.levels_enabled = config['enable_levels']
-            state.pulse_left_led_encoder = config['pulse_left_led_encoder']
-            state.pulse_right_led_encoder = config['pulse_right_led_encoder']
-            state.station_enabled = config['station_enabled'] if 'station_enabled' in config else True
-    else:
-        state.station_name = "Magic Radio"
-    return config
-
-def save_state(state:lcd_ui.UIState):
-    logger.info("Saving state")
-    config = {
-        "station_name": state.station_name,
-        "ensemble": state.ensemble,
-        "volume": state.volume,
-        "pulse_left_led_encoder": state.pulse_left_led_encoder,
-        "pulse_right_led_encoder": state.pulse_right_led_encoder,
-        "enable_visualiser": state.visualiser_enabled,
-        "visualiser": state.visualiser,
-        "enable_levels": state.levels_enabled,
-        "station_enabled": state.station_enabled
-    }
-    with open(config_path, "w") as f:
-        f.write(json.dumps(config))
+                    radio_player, radio_stations, menus, state)
 
 def shutdown(ui=None,kb=None,player=None):
     if ui:
-        save_state(ui.state)
+        state.save_state(ui.state)
         ui.clear_screen()
         ui.reset_station_name_scroll()
         ui.draw_station_name("Bye!")
@@ -154,8 +117,8 @@ def activate_or_run_menu(state, encoder_position):
             state.radio_state.right_menu_selection()
 
     if change_encoder_function:
-        selected_encoder.device.when_rotated_clockwise         = lambda: prev_menu(state, curr_menu)
-        selected_encoder.device.when_rotated_counter_clockwise = lambda: next_menu(state, curr_menu)
+        selected_encoder.device.when_rotated_clockwise         = lambda: next_menu(state, curr_menu)
+        selected_encoder.device.when_rotated_counter_clockwise = lambda: prev_menu(state, curr_menu)
         state.current_menu_item=curr_menu.get_first_menu_item()
         logging.info("Menu currently selected: %s", state.current_menu_item)
         state.menu_timer = menus.PeriodicTask(interval=8, callback=lambda:exit_menu(encoder_position, ui, player, audio_processor))
@@ -289,8 +252,8 @@ except exceptions.NoRadioStations as e:
     player.scan(ui_msg_callback=update_msg)
 
 # Load defaults
-logger.info("Loading defaults")
-current_config = load_state(ui.state)
+logger.info("Loading saved state")
+current_config = state.load_state(ui.state)
 
 # Set up state machine
 ui.state.radio_state = menus.RadioMachine()
@@ -377,6 +340,7 @@ try:
             if audio_processor.get_sample():
                 ui.state.signal = audio_processor.signal
                 (ui.state.peak_l, ui.state.peak_r) = audio_processor.get_peaks()
+                ui.draw_viz(with_lock=True)
 
         if ui.state.left_encoder.device_type.PIMORONI_RGB_BREAKOUT:
             if ui.state.pulse_left_led_encoder:
@@ -386,9 +350,13 @@ try:
                 ui.state.left_encoder.set_colour_by_value(ui.state.peak_r)       
      
         if updates := player.dablin_log_parser.updates():
-            if updates.is_updated('dab_type'):
+            if updates.is_updated('no_signal'):
+                ui.state.have_signal = False
+
+            elif updates.is_updated('dab_type'):
                 ui.state.dab_type=updates.get('dab_type').value
                 logger.info(f"DAB type: {ui.state.dab_type}")
+                ui.state.have_signal = True
 
             elif updates.is_updated('pad_label'):
                 #ui.state.last_pad_message = updates.get('pad_label').value
