@@ -129,7 +129,7 @@ sudo raspi-config nonint do_i2c 1
 
 * If using lite so no GUI etc ensure pipewire-pulse installed:*
 ```
-sudo apt install -y pipewire-pulse
+sudo apt install -y pipewire-pulse pulseaudio-utils
 sudo reboot
 ```
 
