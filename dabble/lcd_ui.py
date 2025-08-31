@@ -29,6 +29,28 @@ class GraphicState(StrEnum):
     GRAPHIC_EQUALISER="graphic_equaliser"
     GRAPHIC_EQUALISER_BARS="graphic_equaliser_bars"
 
+
+@dataclass
+class UITheme():
+    base_font_path:str      ="liberation/LiberationSans"
+    station_font_size:int   = 18 
+    station_font_style:str  = "Regular"
+    ensemble_font_size:int  = 13
+    ensemble_font_style:str = "Regular"
+    menu_font_size:int      = 20
+    menu_font_sml_size:int  = 17
+    menu_font_style:str     ="Bold"
+
+    station:str   = '#FFB703' 
+    ensemble:str  = '#023047' 
+    menu:str      = '#24D111' 
+    menu_sml:str  = '#0B4205' 
+    volume:str    = '#8ECAE6'
+    volume_bg:str = '#023047'
+    viz_line:str  = '#126782'
+    viz_dot:str   = '#8ECAE6'
+
+
 @dataclass
 class UIState():
     '''
@@ -45,6 +67,7 @@ class UIState():
     genre:str            = ""
     dab_type:str         = ""
     current_msg:int      = MessageState.STATION
+    have_signal:bool     = False
 
     volume:int           = 40
     peak_l:int           = 0
@@ -69,6 +92,8 @@ class UIState():
     visualiser:GraphicState        = GraphicState.GRAPHIC_EQUALISER
     levels_enabled:bool            = True
     station_enabled:bool           = True
+
+    colors:dict                    = field(default_factory=dict)
 
     def update(self, prop, value):
         '''
@@ -132,6 +157,9 @@ class LCDUI():
         # 160 x 80 full colour
         # Be mindful of GPIO use when using other devices
         logging.info("Initialising LCD display")
+
+        self.state = UIState()
+
         self.disp = st7735.ST7735(
             port=0,
             cs=0,
@@ -176,7 +204,7 @@ class LCDUI():
         self.station_name_size_x = 0
 
         # TODO: Do we do themes???
-        self.colours = {
+        self.state.colours = {
             #"station":  '#FEFE33', 
             "station":  '#FFB703', 
             #"ensemble": '#B8B814', 
@@ -197,13 +225,29 @@ class LCDUI():
         self.last_max_l_level = 0
         self.last_max_r_level = 0
         self.last_max_signal  = np.zeros(1024)
-        self.state            = UIState()
 
     def get_font_path(self, style):
         fp=str(self.font_dir  / f'{self.base_font}-{style}.ttf')
         logging.info("Font path: %s", fp)
         return fp
    
+
+    def draw_viz(self, with_lock:bool=False):
+       
+        if with_lock:
+            self._lock.acquire()
+
+        if self.state.visualiser_enabled:
+            if self.state.visualiser == GraphicState.GRAPHIC_EQUALISER:
+                self.graphic_equaliser(self.state.signal, base_y=28, height=35)
+            elif self.state.visualiser == GraphicState.GRAPHIC_EQUALISER_BARS:
+                self.graphic_equaliser_bars(self.state.signal, base_y=28, height=35)
+            elif self.state.visualiser == GraphicState.WAVEFORM:
+                self.waveform(self.state.signal, base_y=28, height=35)
+
+        if with_lock:
+            self._lock.release()
+
 
     def draw_interface(self, reset_scroll=False, dim_screen=True, draw_centre_lines:bool=False):
         '''
@@ -224,13 +268,10 @@ class LCDUI():
             if reset_scroll:
                 self.reset_station_name_scroll()
 
-            if self.state.visualiser_enabled:
-                if self.state.visualiser == GraphicState.GRAPHIC_EQUALISER:
-                    self.graphic_equaliser(self.state.signal, base_y=28, height=35)
-                elif self.state.visualiser == GraphicState.GRAPHIC_EQUALISER_BARS:
-                    self.graphic_equaliser_bars(self.state.signal, base_y=28, height=35)
-                elif self.state.visualiser == GraphicState.WAVEFORM:
-                    self.waveform(self.state.signal, base_y=28, height=35)
+            if not self.state.have_signal:
+                self.state.last_pad_message = "No Signal"
+
+            self.draw_viz()
 
             if not self.state.levels_enabled:
                 self.clear_levels()
@@ -311,16 +352,16 @@ class LCDUI():
             self.last_max_l_level=l
 
         if self.last_max_l_level>0:
-            self.draw.point((c+self.last_max_l_level,1),fill=self.colours['viz_dot'])
-            self.draw.point((c-self.last_max_l_level,1),fill=self.colours['viz_dot'])
+            self.draw.point((c+self.last_max_l_level,1),fill=self.state.colours['viz_dot'])
+            self.draw.point((c-self.last_max_l_level,1),fill=self.state.colours['viz_dot'])
             self.last_max_l_level -= 2
 
         if r>self.last_max_r_level:
             self.last_max_r_level=r
 
         if self.last_max_l_level>0:
-            self.draw.point((c+self.last_max_r_level,6),fill=self.colours['viz_dot'])
-            self.draw.point((c-self.last_max_r_level,6),fill=self.colours['viz_dot'])
+            self.draw.point((c+self.last_max_r_level,6),fill=self.state.colours['viz_dot'])
+            self.draw.point((c-self.last_max_r_level,6),fill=self.state.colours['viz_dot'])
             self.last_max_r_level -= 2
 
     def draw_ensemble(self, t:str, clear:bool=True):
@@ -328,7 +369,7 @@ class LCDUI():
         split_point = self.WIDTH//4*3
         if clear:
             self.draw.rectangle((0,self.HEIGHT-text_height-4, split_point, self.HEIGHT), (0, 0, 0))
-        self.draw.text( (0,self.HEIGHT), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="ld")
+        self.draw.text( (0,self.HEIGHT), t, font=self.ensemble_font, fill=self.state.colours["ensemble"],anchor="ld")
 
     def draw_dab_type(self, t:str, clear:bool=True):
         if t=="" or t is None:
@@ -337,7 +378,7 @@ class LCDUI():
         split_point = self.WIDTH//4*3
         if clear:
             self.draw.rectangle((split_point,self.HEIGHT-text_height-4, self.WIDTH, self.HEIGHT), (0, 0, 0))
-        self.draw.text( (self.WIDTH,self.HEIGHT), t, font=self.ensemble_font, fill=self.colours["ensemble"],anchor="rd")
+        self.draw.text( (self.WIDTH,self.HEIGHT), t, font=self.ensemble_font, fill=self.state.colours["ensemble"],anchor="rd")
 
 
     def draw_menu(self, draw=None):
@@ -372,9 +413,9 @@ class LCDUI():
 
             #draw.arc((-30, 0, 30, self.HEIGHT), start=270, end=90, fill="darkgrey")
             draw.line((0, 0, 0, self.HEIGHT), width=1, fill="darkgrey")
-            draw.text( (x, self.CENTRE_HEIGHT-cm_height), prev_menu, font=self.menu_sml_font, fill=self.colours["menu_sml"], anchor='lm')
-            draw.text( (x, self.CENTRE_HEIGHT), display_text, font=self.menu_sel_font, fill=self.colours["menu"], anchor=anchor)
-            draw.text( (x, self.CENTRE_HEIGHT+cm_height), next_menu, font=self.menu_sml_font, fill=self.colours["menu_sml"], anchor='lm')
+            draw.text( (x, self.CENTRE_HEIGHT-cm_height), prev_menu, font=self.menu_sml_font, fill=self.state.colours["menu_sml"], anchor='lm')
+            draw.text( (x, self.CENTRE_HEIGHT), display_text, font=self.menu_sel_font, fill=self.state.colours["menu"], anchor=anchor)
+            draw.text( (x, self.CENTRE_HEIGHT+cm_height), next_menu, font=self.menu_sml_font, fill=self.state.colours["menu_sml"], anchor='lm')
        
 
     def draw_station_name(self, t:str, clear:bool=False):
@@ -396,7 +437,7 @@ class LCDUI():
             #self.draw.rectangle((0,y1,self.WIDTH,y2+4), (0, 0, 0))
             # Viz is 35 pixels high starting at 28
             self.draw.rectangle((0,self.HEIGHT-28-35,self.WIDTH,self.HEIGHT-28), (0, 0, 0))
-        self.draw.text( (text_x, self.CENTRE_HEIGHT), t, font=self.station_font, fill=self.colours["station"], anchor="lm")
+        self.draw.text( (text_x, self.CENTRE_HEIGHT), t, font=self.station_font, fill=self.state.colours["station"], anchor="lm")
 
 
     def scroll_station_name(self, speed=3):
@@ -427,11 +468,11 @@ class LCDUI():
             bar_y = y + (height - bar_height) // 2
 
             # Bar background
-            self.draw.rectangle([x + bar_margin, bar_y, x + width - bar_margin, bar_y + bar_height], self.colours['volume_bg'])
+            self.draw.rectangle([x + bar_margin, bar_y, x + width - bar_margin, bar_y + bar_height], self.state.colours['volume_bg'])
 
             # Bar fill
             fill_width = int((width - 2 * bar_margin) * (volume / max_volume))
-            self.draw.rectangle([x + bar_margin, bar_y, x + bar_margin + fill_width, bar_y + bar_height], fill=self.colours['volume'])
+            self.draw.rectangle([x + bar_margin, bar_y, x + bar_margin + fill_width, bar_y + bar_height], fill=self.state.colours['volume'])
 
     def scale_log(self, c, f):
         return c * math.log(float(1 + f),10);
@@ -481,14 +522,14 @@ class LCDUI():
             else:
                 y1 = int(f * scale)
 
-            self.draw.line( ( i, self.HEIGHT - base_y, i , self.HEIGHT - y1 - base_y), fill=self.colours['viz_line'])
-            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.colours['viz_dot'])
+            self.draw.line( ( i, self.HEIGHT - base_y, i , self.HEIGHT - y1 - base_y), fill=self.state.colours['viz_line'])
+            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.state.colours['viz_dot'])
 
             if y1 > self.last_max_signal[i]:
                 self.last_max_signal[i] = y1
 
             if self.last_max_signal[i]>0:
-                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill=self.colours['viz_dot'])
+                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill=self.state.colours['viz_dot'])
                 self.last_max_signal[i] -= fall_decay
 
 
@@ -533,13 +574,13 @@ class LCDUI():
             x2 = x1 + bar_width - 2
 
             # Draw the bar (rectangle)
-            self.draw.rectangle([x1, self.HEIGHT - base_y - bar_height, x2, self.HEIGHT - base_y], fill=self.colours['viz_line'])
+            self.draw.rectangle([x1, self.HEIGHT - base_y - bar_height, x2, self.HEIGHT - base_y], fill=self.state.colours['viz_line'])
 
             if bar_height > self.last_max_signal[i]:
                 self.last_max_signal[i] = bar_height
 
             if self.last_max_signal[i]>0:
-                self.draw.line([x1, self.HEIGHT - base_y - self.last_max_signal[i], x2, self.HEIGHT - base_y - self.last_max_signal[i]], fill=self.colours['viz_dot'])
+                self.draw.line([x1, self.HEIGHT - base_y - self.last_max_signal[i], x2, self.HEIGHT - base_y - self.last_max_signal[i]], fill=self.state.colours['viz_dot'])
                 self.last_max_signal[i] -= fall_decay
 
 
@@ -569,14 +610,14 @@ class LCDUI():
         for i in range(1,end_range,step):
             y1 = int(mono_signal[i] * scale)
             y2 = int(mono_signal[i+step] * scale)
-            self.draw.line( ( i, self.HEIGHT-y1-base_y, i+step , self.HEIGHT-y2-base_y), fill=self.colours['viz_line'])
-            self.draw.line( ( i, self.HEIGHT-base_y, i , self.HEIGHT-y1-base_y), fill=self.colours['viz_line'])
-            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.colours['viz_dot'])
+            self.draw.line( ( i, self.HEIGHT-y1-base_y, i+step , self.HEIGHT-y2-base_y), fill=self.state.colours['viz_line'])
+            self.draw.line( ( i, self.HEIGHT-base_y, i , self.HEIGHT-y1-base_y), fill=self.state.colours['viz_line'])
+            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.state.colours['viz_dot'])
 
             if y1 > self.last_max_signal[i]:
                 self.last_max_signal[i] = y1
 
             if self.last_max_signal[i]>0:
-                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill=self.colours['viz_dot'])
+                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill=self.state.colours['viz_dot'])
                 self.last_max_signal[i] -= fall_decay
 
