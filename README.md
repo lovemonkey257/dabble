@@ -167,13 +167,21 @@ Code. Most changes have been accepted upstream (thanks Jvan) so this is probably
 
 This should put `eti-cmdline-rtlsdr` into `/usr/local/bin`
 
-## Python
+## Test Radio by Scanning
+
+- Ensure RTL device and audio are set up.
+- `eti-cmdline-rtlsdr -J -x`
+- FINISH THIS
+
+## Dabble
 As this needs system installed packages create requirements as follows:
 
 `pip list --not-required --format=freeze -l > requirements.txt`
 
 To install:
-- `sudo apt install python3-alsaaudio python3-pyaudio`
+- `sudo apt install python3-dev python3-alsaaudio python3-pyaudio`
+- `git clone https://github.com/lovemonkey257/dabble.git`
+- `cd dabble`
 - Create venv `pip -mvenv venv`
 - Edit `./venv/pyvenv.cfg` and ensure `include-system-site-package` is `true`
 - `pip install -r requirements.txt`
