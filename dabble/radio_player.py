@@ -91,7 +91,7 @@ class DablinLogParser():
             for lu in self._lookups:
                 r=self._lookups[lu].search(l)
                 if r:
-                    return ( lu, r.groupdict()['v'] )
+                    return ( lu, r.groupdict()['v'] if 'v' in r.groupdict() else "no_data" )
         except Empty:
             pass
         return (None, None)
@@ -110,6 +110,7 @@ class DablinLogParser():
                 with self._updates_lock:
                     #self._updates = self._parse_dablin_output()
                     k,v = self._parse_dablin_output()
+                    logger.debug("k:%s  v:%s", k, v)
                     if k is not None:
                         self._updates.update(k,v)
                 time.sleep(0.1)
@@ -133,7 +134,7 @@ class RadioPlayer():
         # signal.signal(signal.SIGINT, self.signal_handler)
 
         self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I')
-        self.scan_cmdline=Template('/usr/local/bin/eti-cmdline-rtlsdr -J -x -C $block -D $scantime')
+        self.scan_cmdline=Template('/usr/local/bin/eti-cmdline-rtlsdr -J -x -C $block -D $scantime -Q')
 
     def signal_handler(self, sig, frame):
         print('You pressed Ctrl+C!')
@@ -169,6 +170,8 @@ class RadioPlayer():
             stderr=subprocess.PIPE
         )
         '''
+        There does not seem to be a DAB signal here
+
         FICDecoder: SId 0xCFE8: audio service (SubChId  4, DAB+, primary)
         FICDecoder: SId 0xC4CD: audio service (SubChId 17, DAB+, primary)
         EnsemblePlayer: playing sub-channel 4 (DAB+)
@@ -182,7 +185,8 @@ class RadioPlayer():
             "dab_type":  re.compile(f"^FICDecoder: SId {self.sid}: audio service \(SubChId\s+\d+, (?P<v>.*), primary\)", re.IGNORECASE),
             "prog_type": re.compile(f"^FICDecoder: SId {self.sid}: programme type \(static\): '(?P<v>.*)'", re.IGNORECASE),
             "pad_label": re.compile(f"^PADChangeDynamicLabel SId {self.sid} Label:'(?P<v>.+)'", re.IGNORECASE),
-            "media_fmt": re.compile(f"^EnsemblePlayer: format: (?P<v>.*)", re.IGNORECASE)
+            "media_fmt": re.compile(f"^EnsemblePlayer: format: (?P<v>.*)", re.IGNORECASE),
+            "no_signal": re.compile(f"^There does not seem to be a DAB signal here", re.IGNORECASE)
         }
         # Read dablins log files and populate q
         logger.info("Starting dablin log reader thread")
@@ -218,8 +222,8 @@ class RadioPlayer():
                 logger.error("Buffer overflowed. Possible reception errors")
                 logger.error("%s",s)
             return s
-    
-    def parse_dablin_output(self):
+   
+    def xx_parse_dablin_output(self):
         '''
         Parse the dablin log and run regexs to extract info such as
         PAD announcements, DAB type etc. See play method for more
@@ -230,7 +234,7 @@ class RadioPlayer():
             for lu in self.dablin_stderr_lookups:
                 r=self.dablin_stderr_lookups[lu].search(l)
                 if r:
-                    return { lu : r.groupdict()['v'] }
+                    return { lu : r.groupdict()['v'] if 'v' in r.groupdict() else "" }
         except Empty:
             pass
         return None
