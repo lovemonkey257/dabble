@@ -138,22 +138,25 @@ sudo reboot
 
 ## `dablin`
 Dependencies first.
-- `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libgtkmm-3.0-dev libfdk-aac-dev`
+- `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libfdk-aac-dev`
 
 Now the code (assumes using my fork. Hopefully they may merge in my PR):
 - `sudo apt remove dablin`
 - `git clone https://github.com/lovemonkey257/dablin.git`
 - `cd dablin`
 - `mkdir build && cd build && cmake ..`
-- `make && sudo make install`
+- `make dablin && sudo cp src/dablin /usr/local/bin/`
 
 Note that dablin will be installed in /usr/local/bin/. System installed
 version is in /usr/bin. Check you've removed system version if you have
 problems with PAD.
 
+Also avoid `make install` as that will try to build GTK version. We only want the cli version
+so we mv it manually.
+
 ## `eti-cmdline`
 Dependencies:
-- `sudo apt install libfftw3-dev libsndfile1-dev libsamplerate0-dev librtlsdr-dev libboost-dev libfmt-dev libfmt9 jq`
+- `sudo apt install libfftw3-dev libsndfile1-dev libsamplerate0-dev librtlsdr-dev libboost-dev jq`
 
 Code. Most changes have been accepted upstream (thanks Jvan) so this is probably redundent:
 - `git clone https://github.com/lovemonkey257/eti-stuff.git`
