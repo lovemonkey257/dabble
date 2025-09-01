@@ -488,7 +488,8 @@ class LCDUI():
             width=self.WIDTH
 
         # Convert to mono (average l/r channels)
-        mono_signal = (signal[0::2] + signal[1::2]) / 2
+        # mono_signal = (signal[0::2] + signal[1::2]) / 2
+        mono_signal = signal
 
         # FFT magic
         fft_mag = np.abs(np.fft.rfft(mono_signal))
@@ -543,7 +544,8 @@ class LCDUI():
             width = self.WIDTH
 
         # Convert to mono (average l/r channels)
-        mono_signal = (signal[0::2] + signal[1::2]) / 2
+        # mono_signal = (signal[0::2] + signal[1::2]) / 2
+        mono_signal = signal
 
         # FFT magic
         fft_mag = np.abs(np.fft.rfft(mono_signal))
