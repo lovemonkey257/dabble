@@ -13,15 +13,29 @@ logger = logging.getLogger(__name__)
 
 class AudioProcessing():
 
-    def __init__(self, sample_rate:int=44100, frame_chunk_size:int=1535): #340):
+    def __init__(self, device_index:int=5, frame_chunk_size:int=1535): #340):
         self._max_value=2**16
         
         self.p=pyaudio.PyAudio()
-        self.stream:pyaudio.Stream = None
-        self.sample_rate = sample_rate
-        self.frames_chunk_size = frame_chunk_size # 160*4 #512
+        logger.info("Available Audio Devices:")
+        for i in range(self.p.get_device_count()):
+            dev = self.p.get_device_info_by_index(i)
+            name = dev['name'] # .encode('utf-8')
+            logger.info("Index: %d %-30s MaxI:%3d MaxOut:%3d Sample Rate:%6d", i, name, dev['maxInputChannels'], dev['maxOutputChannels'], dev['defaultSampleRate'])
 
-        '''
+        self.record_dev_index = device_index
+        self.record_dev = self.p.get_device_info_by_index(device_index)
+        self.record_dev_name = self.record_dev['name']
+        logging.info("Using index %d:%s", device_index, self.record_dev_name)
+        self.sample_rate = int(self.record_dev['defaultSampleRate']) #sample_rate
+        self.rec_channels = self.record_dev['maxInputChannels'] #rec_channels
+        self.frames_chunk_size = frame_chunk_size # 160*4 #512
+        logger.info("Sample Rate: %d", self.sample_rate)
+        logger.info("Channels:    %d", self.rec_channels)
+        logger.info("Chunk Size:  %d", self.frames_chunk_size)
+
+        self.stream:pyaudio.Stream = None
+
         try:
             # ALSA naming nightmare. Please pick sensible defaults...
             # Try PCM
@@ -30,8 +44,7 @@ class AudioProcessing():
         except alsaaudio.ALSAAudioError as e:
             logger.info("Nope. Trying Default Mixer")
             # Try "default" whatever it is
-        '''
-        self.mixer = alsaaudio.Mixer()
+            self.mixer = alsaaudio.Mixer()
 
         self.volume=2
         self.ch_l = None
@@ -84,8 +97,9 @@ class AudioProcessing():
         '''
         self.stream=self.p.open(
                         format=pyaudio.paInt16,
-                        channels=2,
+                        channels=self.rec_channels,
                         rate=self.sample_rate,
+                        input_device_index=self.record_dev_index,
                         input=True,
                         start=False, # Need to wait for dablin to catch up
                         frames_per_buffer=self.frames_chunk_size
