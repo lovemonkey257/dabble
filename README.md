@@ -4,10 +4,9 @@ A DAB radio project based on a PI, a small LCD and some LED encoders. The core s
 This project is targetted to be run on a Raspberry Pi running Raspberry OS (this could change). Assumptions reqarding packages etc rely on this. While the hardware could be run on another system using I2C and I2S I've not tested this. 
 
 ## Current progress and Features
-- Forked and fixed dablin cli to output PAD announcements e.g. now playing
 - UI seems stable
-- The Adafruit speakerbonnet/amp works fine now and can capture audio
-- Two encoders work
+- Moved to USB sound card. The Adafruit speakerbonnet/amp works fine now and can capture audio but still have hugh problems with volume control.
+- Airplay via shairplay-sync works and sound switched between radio and airplay
 
 ## Components
 - Raspberry Pi 5. I tried the Pi Zero 2 but the speaker bonnet and ALSA/Pulseaudio did not play nicely. I'll come back to this.
@@ -21,6 +20,7 @@ This project is targetted to be run on a Raspberry Pi running Raspberry OS (this
 - UI and controller written in python
 - Modified version of of eti-cmdline from JvanKatwijk to enable scans. Forked here https://github.com/lovemonkey257/eti-stuff
 - Modified version of dablin from Opendigialradio so I can get PAD messages in cli version, https://github.com/lovemonkey257/dablin
+- Shairplay-sync, built from souce
 
 ## Capture Audio from Adafruit Speaker Bonnet
 The driver for the speaker bonnet does not present a recording interface - its playback only. This
@@ -43,13 +43,18 @@ Anything played through the Bonnet is now fed back into the loopback sink which 
 sound from. I found that the SDL sub-system picked this up automatically and I didn't need to set
 `AUDIODEV`.
 
+Eventually I gave up on the Bonnet and switched to a USB sound card. I'll use external speakers
+as there were too many problems with the Bonnet, not limited to volume control (when used with 
+pipewire) and the above issue, which I solved but added complexity. YMMV.
+
 ### Features
 - DAB and DAB+ reception
 - Station name scroll
 - Ensemble displayed and DAB type
-- Waveform visualiser works
+- Waveform visualiser works (not anymore??)
 - Graphic equaliser works
 - Bar Graphic equaliser works
+- Airplay works (need to fix display of track name etc)
 
 ![alt text](docs/playing.png)
 ![alt text](docs/waveform.png)
@@ -59,7 +64,7 @@ sound from. I found that the SDL sub-system picked this up automatically and I d
 ![alt text](docs/pad-msg.png)
 
 - Menus work
-- Volume works using log scale (seems more natural)
+- Volume works using log scale (seems more natural). Need to add config to toggle this
 - Station selection works
 - Station scanning works, although need to decide how to handle default list of channels to scan
 - Also captures audio format and genre but not currently displayed
@@ -177,6 +182,91 @@ Note the channel (11D) and station (0xc0c6) are the params for Magic Radio in th
 on your location you will need to tweak these. I'm trying to find sources based on country but
 that is for later on, sorry.
 
+## Shairplay-sync
+These instructions are based on those detailed in https://github.com/mikebrady/shairport-sync/issues/1970 (thanks to
+those who figured it out).
+
+- Build dependencies
+
+```
+sudo apt install -y --no-install-recommends build-essential git autoconf automake libtool 
+sudo apt install -y --no-install-recommends build-essential git autoconf automake libtool libpopt-dev libconfig-dev libasound2-dev avahi-daemon libavahi-client-dev libssl-dev  libsoxr-dev libplist-dev libsodium-dev libavutil-dev libavcodec-dev libavformat-dev uuid-dev libgcrypt-dev xxd jq libpipewire-0.3-dev libspa-0.2-bluetooth python3-dbus libdaemon-dev libmosquitto-dev
+```
+
+- Install NQPTP
+```
+git clone https://github.com/mikebrady/nqptp.git
+cd nqptp
+autoreconf -fi
+./configure --with-systemd-startup
+make
+sudo make install
+sudo systemctl enable nqptp
+sudo systemctl start nqptp
+```
+- Install Shairport-sync
+```
+git clone https://github.com/mikebrady/shairport-sync.git
+cd shairport-sync
+autoreconf -fi
+./configure --sysconfdir=/etc --with-pw --with-mqtt-client --with-soxr --with-avahi \
+            --with-ssl=openssl --with-systemd --with-airplay-2 --with-metadata \
+            --with-dbus-interface --with-alsa --with-pw --with-pa`
+make
+sudo make install
+sudo systemctl disable shairport-sync #disable the system level instance.
+
+```
+- Set up user shairport-sync
+- Create `~/.config/systemd/user/shairport-sync.service`. You may need to create directories
+```
+[Unit]
+Description=Shairport Sync - AirPlay Audio Receiver
+After=sound.target
+Wants=network-online.target
+After=network.target network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/shairport-sync --log-to-syslog
+
+[Install]
+WantedBy=default.target
+```
+Note that the github issue adds in a dependency on avahi-daemon (using requires/After), BUT, user
+units cannot rely on system units, there are separate. Go figure but that's how it works at the moment.
+
+- Add config for shairport-sync at `/etc/shairport-sync.conf` e.g.
+
+```
+general = {
+  name = "Dabble-Radio";
+  output_backend="pw";
+};
+alsa = {
+  mixer_control_name = "PCM";
+};
+metadata = {
+        enabled = "yes"; 
+        include_cover_art = "no"; 
+        cover_art_cache_directory = "/tmp/shairport-sync/.cache/coverart"; 
+        pipe_name = "/tmp/shairport-sync-metadata";
+        pipe_timeout = 5000; 
+};
+mqtt = {
+        enabled = "yes"; 
+        //hostname = "host.containers.internal"; // Hostname of the MQTT Broker if using podman
+        hostname = "localhost";
+        port = 1883;
+        topic = "dabble-radio"; 
+        publish_parsed = "yes"; // Whether to publish a small (but useful) subset of metadata under human-understandable topics.
+        publish_cover = "no";   // Whether to publish the cover over MQTT in binary form. This may lead to a bit of load on the broker.
+        enable_remote = "yes";  // Whether to remote control via MQTT. RC is available under `topic`/remote.
+};
+```
+ 
+- Enable avahi-daemon `sudo systemctl enable avahi-daemon && sudo systemctl start avahi-daemon` 
+- Enable shairport-sync `systemctl --user enable shairport-sync.service && systemctl --user start shairport-sync.service`
+
 ## Dabble
 As this needs system installed packages create requirements as follows:
 
@@ -223,7 +313,7 @@ The zip installs under a dir called `static` which you should rename to `noto`.
 By default will select a station. Currently once a station is selected it will be used if left
 for 4 seconds. This feels more intuitive than then having to press the button to select.
 
-Press the button to bring up the menu which allows you to change a number of display settings
+Press the button to bring up the menu which allows you to change a number of dispay settings
 such as Equaliser type, Station on/off, Levels on/off.
 
 ### Right Encoder
