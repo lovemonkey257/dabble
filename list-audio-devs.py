@@ -8,9 +8,10 @@ for i in range(p.get_device_count()):
         name = dev['name'] # .encode('utf-8')
         print("index:", i, name, dev['maxInputChannels'], dev['maxOutputChannels'], dev['defaultSampleRate'])
 
-print('\ndefault input & output device:')
+print('\nDefault input device:')
 info = p.get_default_input_device_info()
 print(f'Index: {info["index"]}\n\tName: {info["name"]} Max Input Channels: {info["maxInputChannels"]} Max Output Channels: {info["maxOutputChannels"]} Sample Rate: {info["defaultSampleRate"]}')
+print('\nDefault output device:')
 info = p.get_default_output_device_info()
 print(f'Index: {info["index"]}\n\tName: {info["name"]} Max Input Channels: {info["maxInputChannels"]} Max Output Channels: {info["maxOutputChannels"]} Sample Rate: {info["defaultSampleRate"]}')
 
