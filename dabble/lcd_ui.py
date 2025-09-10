@@ -67,12 +67,20 @@ class UIState():
     genre:str            = ""
     dab_type:str         = ""
     current_msg:int      = MessageState.STATION
-    have_signal:bool     = False
+    have_signal:bool     = True # Assume signal
+    awaiting_signal:bool = True # Awaiting Dablin to catchup
+
+    client_name:str      = ""   # Airplay Client Name
+    track:str            = ""   # Airplay Track
+    album:str            = ""   # Airplay Album
+    artist:str           = ""   # Airplay Artist
 
     volume:int           = 40
     peak_l:int           = 0
     peak_r:int           = 0
-    signal:np.ndarray    = None
+    #signal:np.ndarray    = None
+    # Inject Audio Processor Object
+    audio_processor:object = None
 
     left_encoder:encoder.Encoder   = None
     right_encoder:encoder.Encoder  = None
@@ -106,17 +114,13 @@ class UIState():
 
     def get_pad_message(self):
         '''
-        Display next PAD message
-
-        TODO: Sometimes msgs are broadcast in quick succession. Currently I display 
-              the last one immediately. Should I queue them and then repeat the last
-              message?
+        Get the PAD message last seen
         '''
         return self.last_pad_message if self.last_pad_message else ""
     
     def get_current_message(self):
         '''
-        Get the current message on the UI
+        Get the current message on the UI, either Station or PAD
         '''
         if self.current_msg == MessageState.STATION:
             return self.station_name
@@ -200,23 +204,18 @@ class LCDUI():
             logging.error("Cannot load font: %s", self.base_font)
             raise exceptions.FontException
 
+        # Use to scroll station/PAD messages
         self.station_name_x      = self.WIDTH 
         self.station_name_size_x = 0
 
-        # TODO: Do we do themes???
+        # TODO: Do we do themes??? Yes we do!!!....
         self.state.colours = {
-            #"station":  '#FEFE33', 
             "station":  '#FFB703', 
-            #"ensemble": '#B8B814', 
             "ensemble": '#023047', 
             "menu":     '#24D111', 
             "menu_sml": '#0B4205', 
-            #"volume":   '#EFD4F7',
             "volume":   '#8ECAE6',
-            #"volume_bg": (0, 102, 0),
             "volume_bg": '#023047',
-            #"equaliser_line": 'darkviolet',
-            #"equaliser_dot":  'deepskyblue'
             "viz_line": '#126782',
             "viz_dot":  '#8ECAE6'
         }
@@ -224,13 +223,12 @@ class LCDUI():
         self.last_r_level     = 0
         self.last_max_l_level = 0
         self.last_max_r_level = 0
-        self.last_max_signal  = np.zeros(1024)
+        self.last_max_signal  = np.zeros(4096)
 
     def get_font_path(self, style):
         fp=str(self.font_dir  / f'{self.base_font}-{style}.ttf')
         logging.info("Font path: %s", fp)
         return fp
-   
 
     def draw_viz(self, with_lock:bool=False):
        
@@ -238,12 +236,13 @@ class LCDUI():
             self._lock.acquire()
 
         if self.state.visualiser_enabled:
-            if self.state.visualiser == GraphicState.GRAPHIC_EQUALISER:
-                self.graphic_equaliser(self.state.signal, base_y=28, height=35)
-            elif self.state.visualiser == GraphicState.GRAPHIC_EQUALISER_BARS:
-                self.graphic_equaliser_bars(self.state.signal, base_y=28, height=35)
-            elif self.state.visualiser == GraphicState.WAVEFORM:
-                self.waveform(self.state.signal, base_y=28, height=35)
+            match self.state.visualiser:
+                case GraphicState.GRAPHIC_EQUALISER:
+                    self.graphic_equaliser(self.state.audio_processor.signal(), base_y=28, height=35)
+                case GraphicState.GRAPHIC_EQUALISER_BARS:
+                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=28, height=35)
+                case GraphicState.WAVEFORM:
+                    self.waveform(self.state.audio_processor.signal(), base_y=28, height=35)
 
         if with_lock:
             self._lock.release()
@@ -263,22 +262,27 @@ class LCDUI():
 
             # If we have no vis OR no signals then make sure we clear the station name area or
             # we will get smudges
-            clear_sn = not self.state.visualiser_enabled or (self.state.peak_l==0 and self.state.peak_r==0)
+            #clear_sn = not self.state.visualiser_enabled or (self.state.peak_l==0 and self.state.peak_r==0)
+            clear_sn = not self.state.visualiser_enabled or \
+                       (self.state.audio_processor.peak_l==0 and self.state.audio_processor.peak_r==0)
+
+            vol_bar_y = self.HEIGHT - 27
 
             if reset_scroll:
                 self.reset_station_name_scroll()
 
-            if not self.state.have_signal:
+            # Scroll station name
+            if self.state.radio_state.playing.is_active or \
+               self.state.radio_state.left_menu_activated.is_active or \
+               self.state.radio_state.right_menu_activated.is_active:
+                self.scroll_station_name()
+
+            if self.state.awaiting_signal:
+                self.state.last_pad_message = "Waiting for Audio.."
+            elif not self.state.have_signal:
                 self.state.last_pad_message = "No Signal"
 
             self.draw_viz()
-
-            if not self.state.levels_enabled:
-                self.clear_levels()
-            else:
-                self.draw_levels(self.state.peak_l, self.state.peak_r)
-
-            vol_bar_y = self.HEIGHT - 27
 
             if self.state.station_enabled or self.state.radio_state.selecting_a_station.is_active:
                 self.draw_station_name(self.state.get_current_message(), clear=clear_sn)
@@ -286,8 +290,14 @@ class LCDUI():
                 self.draw_station_name(" ", clear=clear_sn)
 
             self.draw_volume_bar(self.state.volume, x=0,y=vol_bar_y, height=4)   
+            self.draw_mode(clear=True)
             self.draw_ensemble(self.state.ensemble, clear=True)
             self.draw_dab_type(self.state.dab_type, clear=True)
+
+            if not self.state.levels_enabled:
+                self.clear_levels() # y=vol_bar_y + 6)
+            else:
+                self.draw_levels(self.state.audio_processor.peak_l, self.state.audio_processor.peak_r) #, y=vol_bar_y + 6)
 
             if draw_centre_lines:
                 self.draw.line((self.CENTRE_WIDTH, 0, self.CENTRE_WIDTH, self.HEIGHT),  fill='gray')
@@ -310,6 +320,7 @@ class LCDUI():
         else:
             self.disp.display(img)
 
+
     def _get_text_hw_and_bb(self, t:str, font=None):
         '''
         Get boundingbox, text height and width give text str and font
@@ -319,8 +330,10 @@ class LCDUI():
         text_width  = self.draw.textlength(t, font=font)
         return (x1,y1,x2,y2,text_height,text_width)
 
+
     def clear_screen(self):
         self.draw.rectangle((0, 0, self.WIDTH, self.HEIGHT), (0, 0, 0))
+
 
     def show_startup(self):
         self.clear_screen()
@@ -328,50 +341,65 @@ class LCDUI():
         self.draw_ensemble("(c) digital-gangsters 2025")
         self.update()
 
-    def clear_levels(self):
+
+    def clear_levels(self, y:int=1):
         # Clear the top part of the screen
-        self.draw.rectangle((0,1,self.WIDTH,6), (0, 0, 0))
+        self.draw.rectangle((0,y,self.WIDTH,y+3), (0, 0, 0))
 
-    def draw_levels(self, l:int, r:int, decay:int=2):
+    def draw_levels(self, l:int, r:int, y:int=1, decay:int=1, rainbow:bool=False):
         c=self.WIDTH/2
-        # logger.info("%d %d",l,r)
-        lx1=c-l
-        lx2=c+l
-        rx1=c-r
-        rx2=c+r
-        l_line_colour_rgb = tuple(int(c*255) for c in colorsys.hsv_to_rgb(l/10, 0.8, 0.9))
-        r_line_colour_rgb = tuple(int(c*255) for c in colorsys.hsv_to_rgb(r/10, 0.8, 0.9))
-
-        self.clear_levels()
-
-        # Draw the levels
-        self.draw.line((lx1,1,lx2,1),fill=l_line_colour_rgb, width=1)
-        self.draw.line((rx1,6,rx2,6),fill=r_line_colour_rgb, width=1)
-
+        y=self.HEIGHT-1
+        lx1=c-l-1
+        rx1=c+r+1
+        l_line_colour_rgb = self.state.colours['viz_line'] if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(l/10, 0.8, 0.9))
+        r_line_colour_rgb = self.state.colours['viz_line'] if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(r/10, 0.8, 0.9))
+        self.clear_levels(y=y)
+        self.draw.line((c,y,lx1,y),fill=l_line_colour_rgb, width=1)
+        self.draw.line((c,y,rx1,y),fill=r_line_colour_rgb, width=1)
+        self.draw.point((c,y),fill=self.state.colours['viz_dot'])
         if l>self.last_max_l_level:
             self.last_max_l_level=l
-
-        if self.last_max_l_level>0:
-            self.draw.point((c+self.last_max_l_level,1),fill=self.state.colours['viz_dot'])
-            self.draw.point((c-self.last_max_l_level,1),fill=self.state.colours['viz_dot'])
-            self.last_max_l_level -= 2
-
         if r>self.last_max_r_level:
             self.last_max_r_level=r
-
         if self.last_max_l_level>0:
-            self.draw.point((c+self.last_max_r_level,6),fill=self.state.colours['viz_dot'])
-            self.draw.point((c-self.last_max_r_level,6),fill=self.state.colours['viz_dot'])
-            self.last_max_r_level -= 2
+            self.draw.point((c-self.last_max_l_level,y),fill=self.state.colours['viz_dot'])
+            self.last_max_l_level -= decay
+        if self.last_max_r_level>0:
+            self.draw.point((c+self.last_max_r_level,y),fill=self.state.colours['viz_dot'])
+            self.last_max_r_level -= decay
+
+    def draw_mode(self, clear:bool=True):
+        '''
+        Draw Mode
+        '''
+        t = "Radio Airplay"
+        (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.ensemble_font)
+        if clear:
+            self.draw.rectangle((0,0, text_width, text_height), (0, 0, 0))
+
+        ra_col = "white" if self.state.radio_state.mode==menus.PlayerMode.RADIO else self.state.colours['ensemble']
+        ap_col = "white" if self.state.radio_state.mode==menus.PlayerMode.AIRPLAY else self.state.colours['ensemble']
+            
+        #self.draw.text( (0,y1),t , font=self.ensemble_font, fill=self.state.colours["ensemble"],anchor="lt")
+        self.draw.text( (0,y1),"Radio" , font=self.ensemble_font, fill=ra_col, anchor="lt")
+        self.draw.text( (35,y1),"Airplay", font=self.ensemble_font, fill=ap_col, anchor="lt")
+
 
     def draw_ensemble(self, t:str, clear:bool=True):
+        '''
+        Draw Ensemble. Divide bottom into 4 and Ensemble text consumes 3/4 of screen
+        '''
         (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.ensemble_font)
         split_point = self.WIDTH//4*3
         if clear:
             self.draw.rectangle((0,self.HEIGHT-text_height-4, split_point, self.HEIGHT), (0, 0, 0))
         self.draw.text( (0,self.HEIGHT), t, font=self.ensemble_font, fill=self.state.colours["ensemble"],anchor="ld")
 
+
     def draw_dab_type(self, t:str, clear:bool=True):
+        '''
+        Draw DAB Type. Divide bottom into 4 and Type text consumes last 1/4 of screen
+        ''' 
         if t=="" or t is None:
             t="DAB"
         (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.ensemble_font)
@@ -382,6 +410,9 @@ class LCDUI():
 
 
     def draw_menu(self, draw=None):
+        '''
+        Draw on-screen menu
+        '''
         draw = self.draw if draw is None else draw
 
         menu_id      = self.state.current_menu_item.menu_id
@@ -400,7 +431,7 @@ class LCDUI():
             menu_list=self.state.lm.menu_list 
             i=self.state.lm.menu_index
         elif self.state.radio_state.right_menu_activated.is_active or \
-           self.state.radio_state.selecting_a_menu.is_active:
+             self.state.radio_state.selecting_a_menu.is_active:
             anchor="rm"
             x=self.WIDTH
             menu_list=self.state.rm.menu_list 
@@ -411,7 +442,6 @@ class LCDUI():
             prev_menu = menu_list[i-1].dstate() if i>0 else menu_list[-1].dstate()
             next_menu = menu_list[i+1].dstate() if i<len(menu_list)-1 else menu_list[0].dstate()
 
-            #draw.arc((-30, 0, 30, self.HEIGHT), start=270, end=90, fill="darkgrey")
             draw.line((0, 0, 0, self.HEIGHT), width=1, fill="darkgrey")
             draw.text( (x, self.CENTRE_HEIGHT-cm_height), prev_menu, font=self.menu_sml_font, fill=self.state.colours["menu_sml"], anchor='lm')
             draw.text( (x, self.CENTRE_HEIGHT), display_text, font=self.menu_sel_font, fill=self.state.colours["menu"], anchor=anchor)
@@ -434,24 +464,21 @@ class LCDUI():
         self.station_name_size_x = text_width
 
         if clear:
-            #self.draw.rectangle((0,y1,self.WIDTH,y2+4), (0, 0, 0))
             # Viz is 35 pixels high starting at 28
             self.draw.rectangle((0,self.HEIGHT-28-35,self.WIDTH,self.HEIGHT-28), (0, 0, 0))
         self.draw.text( (text_x, self.CENTRE_HEIGHT), t, font=self.station_font, fill=self.state.colours["station"], anchor="lm")
 
 
-    def scroll_station_name(self, speed=3):
-        with self._lock:
-            self.station_name_x += int(speed)
-            # Rotate back 
-            if self.station_name_x >= self.station_name_size_x + self.WIDTH:
-                self.station_name_x = 0
-                self.state.get_next_message()
+    def scroll_station_name(self, speed=2):
+        self.station_name_x += int(speed)
+        # Rotate back 
+        if self.station_name_x >= self.station_name_size_x + self.WIDTH:
+            self.station_name_x = 0
+            self.state.get_next_message()
 
 
     def reset_station_name_scroll(self):
-        with self._lock:
-            self.station_name_x = self.WIDTH
+        self.station_name_x = self.WIDTH
 
 
     def draw_volume_bar(self, volume, max_volume=100, width=160, height=4, x=0, y=0, bar_margin=0):
@@ -474,67 +501,77 @@ class LCDUI():
             fill_width = int((width - 2 * bar_margin) * (volume / max_volume))
             self.draw.rectangle([x + bar_margin, bar_y, x + bar_margin + fill_width, bar_y + bar_height], fill=self.state.colours['volume'])
 
+
     def scale_log(self, c, f):
         return c * math.log(float(1 + f),10);
 
 
-    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=False):
+    def fft(self, signal, is_mono:bool=False, use_window:bool=True, use_db_scale:bool=False):
+        '''
+        Calc FFT of signal.
+        TODO: Move to audio_processing
+        '''
+        # Convert to mono, and use float to avoid int overflows
+        if not is_mono:
+            mono_signal = (signal[0::2].astype(np.float32) + signal[1::2].astype(np.float32)) / 2.0 
+            mono_signal = mono_signal.astype(np.int16)
+
+        # FFT magic
+        windowed_signal = mono_signal * np.hanning(len(mono_signal)) if use_window else mono_signal
+        fft_data        = np.fft.rfft(windowed_signal)
+        fft_spectrum    = np.abs(fft_data/1024)
+        if use_db_scale:
+            # While accurate, looks rubbish
+            fft_spectrum = 20 * np.log10(fft_spectrum + 1e-6)
+        return fft_spectrum
+
+
+    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=2, use_log_scale:bool=False, is_mono:bool=False):
         '''
         Show frequencies using fft
         '''
         if signal is None:
             return
+
         if width==0:
             width=self.WIDTH
 
-        # Convert to mono (average l/r channels)
-        # mono_signal = (signal[0::2] + signal[1::2]) / 2
-        mono_signal = signal
-
-        # FFT magic
-        fft_mag = np.abs(np.fft.rfft(mono_signal))
-        max_mag = np.max(fft_mag)
-        if max_mag==0.0:
+        fft_spectrum = self.fft(signal, is_mono=is_mono)
+        # FFT spectrum seems to be repeated so take what looks like
+        # first "chunk" of repeated data
+        fft_spectrum = fft_spectrum[0:256]
+        max_magnitude = np.max(fft_spectrum)
+        if max_magnitude==0.0:
             return
-       
-        # Calc scale
-        scale:float = float(height)/max_mag
-        if use_log_scale:
-            c = max_mag/math.log(max_mag+1,10)/2;
+        scale:float = float(height)/max_magnitude
 
-        # Scale steps. Does mean we may miss some freq components.
-        end_range = len(fft_mag) - 1
-        step      = int(len(fft_mag)/width)
-        # If too small enforce step size
-        if step<=1:
-            step=2
-
-        # Clear
+        # Clear existing graphics
         self.draw.rectangle((0,self.HEIGHT-height-base_y,self.WIDTH,self.HEIGHT-base_y), fill="black")
 
-        y1=0
-        for i in range(0, end_range, step):
-            if i==0:
-                continue
-            f=fft_mag[i]
-            if use_log_scale:
-                v = round(self.scale_log(c, f));
-                y1 = int(v * scale)
-            else:
-                y1 = int(f * scale)
+        # Map FFT bins to x-axis
+        num_bins = len(fft_spectrum)
 
-            self.draw.line( ( i, self.HEIGHT - base_y, i , self.HEIGHT - y1 - base_y), fill=self.state.colours['viz_line'])
-            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.state.colours['viz_dot'])
+        # self.draw.line ( (0, self.HEIGHT - base_y - height, self.WIDTH , self.HEIGHT - base_y - height), fill=self.state.colours['viz_line'])
+        for x in range(0,self.WIDTH,2):
+            # Map x pixel to FFT bin index
+            bin_index = int((x / self.WIDTH) * num_bins)
+            if bin_index >= num_bins:
+                bin_index = num_bins - 1
+            # Calc Y position scaled
+            y = int(fft_spectrum[bin_index] * scale)
+            # Draw line and dot
+            self.draw.line ( (x, self.HEIGHT - base_y, x , self.HEIGHT - y - base_y), fill=self.state.colours['viz_line'])
+            self.draw.point( (x, self.HEIGHT - y - base_y), fill=self.state.colours['viz_dot'])
+            # Draw decay point
+            if y > self.last_max_signal[x]:
+                self.last_max_signal[x] = y
 
-            if y1 > self.last_max_signal[i]:
-                self.last_max_signal[i] = y1
-
-            if self.last_max_signal[i]>0:
-                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill=self.state.colours['viz_dot'])
-                self.last_max_signal[i] -= fall_decay
+            if self.last_max_signal[x]>0:
+                self.draw.point(((x , self.HEIGHT - self.last_max_signal[x] - base_y)),fill=self.state.colours['viz_dot'])
+                self.last_max_signal[x] -= fall_decay
 
 
-    def graphic_equaliser_bars(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=True, num_bars:int=32):
+    def graphic_equaliser_bars(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=2, use_log_scale:bool=True, num_bars:int=32, is_mono:bool=False):
         '''
         Show frequencies using fft, grouped into num_bars (default 10) bins.
         '''
@@ -543,83 +580,84 @@ class LCDUI():
         if width == 0:
             width = self.WIDTH
 
-        # Convert to mono (average l/r channels)
-        # mono_signal = (signal[0::2] + signal[1::2]) / 2
-        mono_signal = signal
-
-        # FFT magic
-        fft_mag = np.abs(np.fft.rfft(mono_signal))
-        max_mag = np.max(fft_mag)
-        if max_mag == 0.0:
+        fft_spectrum = self.fft(signal, is_mono=is_mono)
+        fft_spectrum = fft_spectrum[0:256] 
+        max_magnitude = np.max(fft_spectrum)
+        if max_magnitude == 0.0:
             return
-
-        # Calc scale
-        scale: float = float(height) / max_mag
+        scale:float = float(height)/max_magnitude
 
         # Bin the FFT magnitudes into num_bars
-        bin_size = len(fft_mag) // num_bars
+        # bin_size = len(fft_mag) // num_bars
+        bin_size = len(fft_spectrum) // num_bars # // 12 
         bar_width = width // num_bars
 
         # Clear area
         self.draw.rectangle((0, self.HEIGHT - height - base_y, self.WIDTH, self.HEIGHT - base_y), fill="black")
 
-        for i in range(num_bars):
-            start = i * bin_size
+        # self.draw.line ( (0, self.HEIGHT - base_y - height, self.WIDTH , self.HEIGHT - base_y - height), fill=self.state.colours['viz_line'])
+        for x in range(0,num_bars):
+            start = x * bin_size
             end = start + bin_size
-            if end > len(fft_mag):
-                end = len(fft_mag)
-            # Aggregate magnitude within the bin (mean or max)
-            #bar_value = np.mean(fft_mag[start:end])
-            bar_value = np.max(fft_mag[start:end])
+            if end > len(fft_spectrum):
+                end = len(fft_spectrum)
+            # Aggregate magnitude within the bin
+            bar_value  = np.max(fft_spectrum[start:end])
             bar_height = int(bar_value * scale)
-            x1 = i * bar_width
+            x1 = x * bar_width
             x2 = x1 + bar_width - 2
 
             # Draw the bar (rectangle)
             self.draw.rectangle([x1, self.HEIGHT - base_y - bar_height, x2, self.HEIGHT - base_y], fill=self.state.colours['viz_line'])
 
-            if bar_height > self.last_max_signal[i]:
-                self.last_max_signal[i] = bar_height
+            if bar_height > self.last_max_signal[x]:
+                self.last_max_signal[x] = bar_height
 
-            if self.last_max_signal[i]>0:
-                self.draw.line([x1, self.HEIGHT - base_y - self.last_max_signal[i], x2, self.HEIGHT - base_y - self.last_max_signal[i]], fill=self.state.colours['viz_dot'])
-                self.last_max_signal[i] -= fall_decay
+            if self.last_max_signal[x]>0:
+                self.draw.line([x1, self.HEIGHT - base_y - self.last_max_signal[x], x2, self.HEIGHT - base_y - self.last_max_signal[x]], fill=self.state.colours['viz_dot'])
+                self.last_max_signal[x] -= fall_decay
 
 
-    def waveform(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=4):
+    def waveform(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=4, is_mono:bool=False):
         '''
         Show waveform
+
+        TODO: VERY BROKEN - DO NOT USE ATM
         '''
+        return
+
         if signal is None:
             return
         if width==0:
             width=self.WIDTH
 
-        mono_signal = np.abs((signal[0::2] + signal[1::2]) / 2)
-        max_mag = np.max(mono_signal)
-        if max_mag==0:
+        max_magnitude = np.max(signal)
+        if max_magnitude==0:
             return
+        scale:float = float(height)/max_magnitude
        
         # Calc scale
-        step=int(len(mono_signal)/width)
-        end_range = len(mono_signal)-step
-        scale:float = float(height)/max_mag
+        bin_size = len(signal) // 30
+        step_width = width // 30
 
-        # Clear
-        self.draw.rectangle((0,self.HEIGHT-height-base_y,self.WIDTH,self.HEIGHT-base_y), fill="black")
+        for x in range(0,30):
+            start = x * bin_size
+            end = start + bin_size
+            if end > len(signal):
+                end = len(signal)
+            y1 = int(signal[start] * scale)
+            y2 = int(signal[end] * scale)
 
-        # Draw waveform
-        for i in range(1,end_range,step):
-            y1 = int(mono_signal[i] * scale)
-            y2 = int(mono_signal[i+step] * scale)
-            self.draw.line( ( i, self.HEIGHT-y1-base_y, i+step , self.HEIGHT-y2-base_y), fill=self.state.colours['viz_line'])
-            self.draw.line( ( i, self.HEIGHT-base_y, i , self.HEIGHT-y1-base_y), fill=self.state.colours['viz_line'])
-            self.draw.point( (i , self.HEIGHT - y1 - base_y), fill=self.state.colours['viz_dot'])
+            # Draw line between peaks
+            self.draw.line( ( x, self.HEIGHT-base_y-y1, x+step_width , self.HEIGHT-base_y-y2), fill=self.state.colours['viz_line'])
+            self.draw.point( (x, self.HEIGHT - y1 - base_y), fill=self.state.colours['viz_dot'])
 
+            '''
             if y1 > self.last_max_signal[i]:
                 self.last_max_signal[i] = y1
 
             if self.last_max_signal[i]>0:
                 self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill=self.state.colours['viz_dot'])
                 self.last_max_signal[i] -= fall_decay
+            '''
 
