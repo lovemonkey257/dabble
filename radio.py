@@ -12,11 +12,15 @@ import time
 import sys
 from enum import Enum
 from pathlib import Path
+import paho.mqtt.client as mqtt
 
 from dabble import (audio_processing, encoder, exceptions, keyboard, lcd_ui,
                     radio_player, radio_stations, menus, state)
 
-def shutdown(ui=None,kb=None,player=None):
+def shutdown(ui=None,kb=None,player=None, mqttc=None):
+    if mqttc:
+        mqttc.loop_stop()
+
     if ui:
         state.save_state(ui.state)
         ui.clear_screen()
@@ -38,7 +42,6 @@ def shutdown(ui=None,kb=None,player=None):
         ui.update()
         ui.disp.display_off()
         ui.disp.set_backlight(0)
-
 
 #########################################################
 # CALLBACKS
@@ -208,6 +211,39 @@ def initiate_scan(ui,player,audio_processor):
     time.sleep(2)
 
 
+def on_connect(client, userdata, flags, reason_code, properties):
+    logger.info(f"Connected with result code {reason_code}")
+    # Subscribing in on_connect() means that if we lose the connection and
+    # reconnect then subscriptions will be renewed.
+    client.subscribe("dabble-radio/#")
+
+# The callback for when a PUBLISH message is received from the server.
+def on_message(client, userdata, msg, ui=None, audio_processor=None):
+    logger.info("MQTT Topic:%s - %s", msg.topic, str(msg.payload))
+    (base_topic, prop) = msg.topic.split("/",2)
+    if base_topic=="dabble-radio":
+        match prop:
+            case "client_name":
+                client_name = str(msg.payload)
+                logger.info("Inbound Airplay connection from: %s", client_name)
+            case "active_start":
+                logger.info("Airplay activated, Radio should shutdown")
+                ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
+                player.stop()
+            case "active_end":
+                logger.info("Airplay deactivated, Radio should start up again")
+                ui.state.radio_state.mode = menus.PlayerMode.RADIO
+                player.play(ui.state.station_name)
+            case "album":
+                logger.info("Airplay %s: %s", prop, str(msg.payload))
+                ui.state.album = str(msg.payload)
+            case "track":
+                logger.info("Airplay %s: %s", prop, str(msg.payload))
+                ui.state.track = str(msg.payload)
+            case "artist":
+                logger.info("Airplay %s: %s", prop, str(msg.payload))
+                ui.state.artist = str(msg.payload)
+
 #########################################################
 # MAIN
 #########################################################
@@ -219,6 +255,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.info("Dabble Radio initialising")
+
+
 
 ui = None
 try:
@@ -232,7 +270,7 @@ try:
     )
 except exceptions.FontException:
     logging.fatal("Cannot load fonts")
-    shutdown()
+    shutdown(mqttc=mqttc)
     sys.exit()
 
 # Display startup message
@@ -301,12 +339,22 @@ ui.state.lm.add_menu("Station Name", init_state="On" if ui.state.station_enabled
 ui.state.lm.add_menu("Exit").action(lambda: exit_menu(encoder.EncoderPosition.LEFT, ui, player, audio_processor))
 
 ui.state.rm = menus.Menu()
+ui.state.rm.add_menu("Radio Mode", init_state="On" if ui.state.radio_state.mode == menus.PlayerMode.RADIO  else "Off")\
+        .action(lambda: ui.state.radio_state.update("mode",menus.PlayerMode.RADIO))\
+        .change_state(lambda: "On" if ui.state.radio_state.mode == menus.PlayerMode.RADIO else "Off")
+
+ui.state.rm.add_menu("Airplay Mode", init_state="On" if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY  else "Off")\
+        .action(lambda: ui.state.radio_state.update("mode", menus.PlayerMode.AIRPLAY))\
+        .change_state(lambda: "On" if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY else "Off")
+
 ui.state.rm.add_menu("Scan Channels").action(lambda: initiate_scan(ui,player,audio_processor))
+
 ui.state.rm.add_menu("Exit").action(lambda: exit_menu(encoder.EncoderPosition.RIGHT, ui, player, audio_processor))
 
 logger.info("Setting colour of left encoder")
 ui.state.left_encoder.set_colour_by_rgb(ui.state.left_led_rgb)
 
+# TODO: What mode are we starting in???
 logger.info(f'Begin playing {ui.state.station_name}')
 player.play(ui.state.station_name)
 ui.state.station_name = player.playing
@@ -314,7 +362,9 @@ ui.state.ensemble     = player.ensemble
 ui.update()
 
 logger.info("Audio processing initialising")
-audio_processor = audio_processing.AudioProcessing(frame_chunk_size=512)
+audio_processor = audio_processing.AudioProcessing() 
+ui.state.audio_processor = audio_processor
+
 # Set volume
 audio_processor.set_volume(ui.state.volume)
 logger.info(f'Volume set to {audio_processor.volume}')
@@ -329,69 +379,55 @@ ui.state.left_encoder.device.when_rotated_counter_clockwise  = lambda: change_st
 ui.state.right_encoder.device.when_rotated_clockwise         = lambda: ui.state.update("volume",audio_processor.vol_up(2))
 ui.state.right_encoder.device.when_rotated_counter_clockwise = lambda: ui.state.update("volume",audio_processor.vol_down(2))
 
+# Start MQTT event loop
+mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+mqttc.on_connect = on_connect
+mqttc.on_message = lambda client,userdata,msg: on_message(client, userdata, msg, ui=ui, audio_processor=audio_processor)
+#mqttc.on_message = on_message
+mqttc.connect("localhost", 1883, 60)
+mqttc.loop_start()
+
 # Lets start the party....
 logger.info("Radio main loop starting")
 ui.reset_station_name_scroll()
 
 try:
     while True:
-        # Get audio data before anything else
-        if audio_processor.stream.is_active():
-            if audio_processor.get_sample():
-                ui.state.signal = audio_processor.signal
-                (ui.state.peak_l, ui.state.peak_r) = audio_processor.get_peaks()
-                ui.draw_viz(with_lock=True)
-
-        if ui.state.left_encoder.device_type.PIMORONI_RGB_BREAKOUT:
-            if ui.state.pulse_left_led_encoder:
-                ui.state.left_encoder.set_colour_by_value(ui.state.peak_l)       
-        if ui.state.right_encoder.device_type.PIMORONI_RGB_BREAKOUT:
-            if ui.state.pulse_right_led_encoder:
-                ui.state.left_encoder.set_colour_by_value(ui.state.peak_r)       
-     
+        # TODO: Convert updates to callback?
         if updates := player.dablin_log_parser.updates():
             if updates.is_updated('no_signal'):
                 ui.state.have_signal = False
+                ui.state.awaiting_signal = False
 
             elif updates.is_updated('dab_type'):
                 ui.state.dab_type=updates.get('dab_type').value
                 logger.info(f"DAB type: {ui.state.dab_type}")
-                ui.state.have_signal = True
+                ui.state.have_signal     = True
+                ui.state.awaiting_signal = False
 
             elif updates.is_updated('pad_label'):
-                #ui.state.last_pad_message = updates.get('pad_label').value
                 pad = updates.get('pad_label').value
                 if ui.state.last_pad_message == "":
                     ui.state.last_pad_message = pad
                 else:
                     ui.state.next_pad_message = pad
+                ui.state.awaiting_signal = False
                 logger.info(f"PAD msg: \"{pad}\"")
 
             elif updates.is_updated('media_fmt'):
+                ui.state.awaiting_signal = False
                 ui.state.audio_format = updates.get('media_fmt').value
                 logger.info(f"Audio format: \"{ui.state.audio_format}\"")
 
             elif updates.is_updated('prog_type'):
+                ui.state.awaiting_signal = False
                 ui.state.genre = updates.get('prog_type').value
                 logger.info(f"Genre: \"{ui.state.genre}\"")
 
-        # Only scroll if we are in certain states
-        if ui.state.radio_state.playing.is_active or \
-           ui.state.radio_state.left_menu_activated.is_active or \
-           ui.state.radio_state.right_menu_activated.is_active:
-
-            # Scroll station name
-            ui.scroll_station_name()
-            # Ensure we are streaming audio to visualisers
-            audio_processor.stream.start_stream()
-
         # Draw the UI
         ui.draw_interface()
-
-        ## and .... breathe
         time.sleep(0.01)
-    
-
+    # end while
 except (KeyboardInterrupt,SystemExit):
     audio_processor.stream.close()
     audio_processor.p.terminate()
