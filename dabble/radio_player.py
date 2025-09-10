@@ -63,6 +63,7 @@ class DablinLogParser():
         self._lookups = dict()
         self._updates_lock = Lock()
         self._recv_errors = 0
+        self._updates = None
 
     def _get_line_from_q(self, recd_threshold:int=255):
             s=""
