@@ -58,30 +58,35 @@ class PeriodicTask:
         self.run()
 
 
+class PlayerMode(Enum):
+    RADIO = 0
+    AIRPLAY = 1
+
 class RadioMachine(StateMachine):
 
-    previous_state       = None
+    previous_state        = None
+    mode                  = PlayerMode.RADIO
 
-    playing              = State(initial=True)
-    selecting_a_station  = State()
-    left_menu_activated  = State()
-    right_menu_activated = State()
-    selecting_a_menu     = State()
+    playing               = State(initial=True)
+    selecting_a_station   = State()
+    left_menu_activated   = State()
+    right_menu_activated  = State()
+    selecting_a_menu      = State()
     scanning_for_stations = State()
 
     # Events
-    activate_left_menu           = playing.to(left_menu_activated) 
-    left_menu_selection          = left_menu_activated.to(selecting_a_menu) 
-    exit_left_menu               = selecting_a_menu.to(playing)
-    left_menu_timeout            = left_menu_activated.to(playing)
+    activate_left_menu    = playing.to(left_menu_activated) 
+    left_menu_selection   = left_menu_activated.to(selecting_a_menu) 
+    exit_left_menu        = selecting_a_menu.to(playing)
+    left_menu_timeout     = left_menu_activated.to(playing)
 
-    activate_right_menu          = playing.to(right_menu_activated)
-    right_menu_selection         = right_menu_activated.to(selecting_a_menu) 
-    exit_right_menu              = selecting_a_menu.to(playing)
-    right_menu_timeout           = right_menu_activated.to(playing)
+    activate_right_menu   = playing.to(right_menu_activated)
+    right_menu_selection  = right_menu_activated.to(selecting_a_menu) 
+    exit_right_menu       = selecting_a_menu.to(playing)
+    right_menu_timeout    = right_menu_activated.to(playing)
 
-    toggle_select_station        = playing.to(selecting_a_station) | selecting_a_station.to(playing)
-    toggle_scan                  = right_menu_activated.to(scanning_for_stations) | scanning_for_stations.to(right_menu_activated) 
+    toggle_select_station = playing.to(selecting_a_station) | selecting_a_station.to(playing)
+    toggle_scan           = right_menu_activated.to(scanning_for_stations) | scanning_for_stations.to(right_menu_activated) 
 
     def on_transition(self, event_data, event: Event):
             assert event_data.event == event
@@ -94,21 +99,37 @@ class RadioMachine(StateMachine):
         self.previous_state = state.id
         logger.info("Transition in progress. From state: %s", state.id)
 
+    def update(self, prop, value):
+        '''
+        Allow state to be changed using <obj>.update("prop",value)
+        Means it can be used in lambdas which don't like <obj>.<prop>=<value>
+        '''
+        setattr(self, prop, value)
+        logger.info("Changing %s to %s. Actual set to: %s", prop, value, getattr(self,prop))
+        return getattr(self, prop)
+
 
 @dataclass
 class MenuItem():
     menu_id:str = ""  # Unique ID of menu item
     display:str = ""  # What to display
     state:str   = ""  # Is it on/off or a value?
+
     def dstate(self):
         '''
         Returns what the menu item should be displayed as
+        e.g.
+        "text: on|off" or "just some text"
         '''
         return f'{self.display}: {self.state}' if self.state else self.display
 
 class Menu():
     '''
     A very simple menuing systen. Nesting not currently supported
+    Supports on/off settings or just text
+    
+    TODO:
+    - Add way of selecting value e.g. using encoder to inc/dec value and button to lock in
     '''
     def __init__(self):
         self.menu = dict()
@@ -141,6 +162,8 @@ class Menu():
             logger.info("Running state update for %s",menu_item)
             for menu_id in self.state_update:
                 self.menu[menu_id].state = self.state_update[menu_id]()
+                logger.info("- Update %s, state now: %s", menu_id, self.menu[menu_id].state)
+            logger.info("States updated")
         return r
 
     def _create_menu_list(self):
