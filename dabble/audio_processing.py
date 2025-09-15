@@ -107,6 +107,10 @@ class AudioProcessing():
             #s=deepcopy(self._signal) # .copy()
         return s
 
+    def zero_signal(self):
+        with self._lock:
+            self._signal = np.zeros(4096)
+
     def log_volume(self, level:int, max_steps:int=60) -> int:
         """
         Map linear encoder position to logarithmic volume.
@@ -119,12 +123,14 @@ class AudioProcessing():
     def vol_up(self, inc:int=2):
         with self._lock:
             self.set_volume(vol=self.volume+inc)
-        return self.volume        
+            v=self.volume
+        return v
 
     def vol_down(self, inc:int=2):
         with self._lock:
             self.set_volume(vol=self.volume-inc)
-        return self.volume
+            v=self.volume
+        return v
     
     def set_volume(self, vol:int=-1, use_log:bool=False):
         self.volume=vol
