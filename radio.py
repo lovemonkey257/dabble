@@ -157,8 +157,12 @@ def play_new_station(ui,player,audio_processor):
 
 def change_station(ui,player,audio_processor):
     '''
-    Use is moving dial to change station
-    If dial isn't moved timer is triggered to play that station
+    User is moving dial to change station
+    If dial isn't moved timer is triggered which when expires will
+    play that station.
+
+    TODO: Do we need to press encoder to select or auto select or
+          is it configurable?
     '''
     if ui.state.radio_state.playing.is_active or \
        not ui.state.radio_state.left_menu_activated.is_active and \
@@ -180,11 +184,13 @@ def change_station(ui,player,audio_processor):
         station_number = left_encoder_value + player.radio_stations.station_index(player.playing)
 
         # Get the new station name and details
+        audio_processor.zero_signal()
         (ui.state.station_name, station_details)=player.radio_stations.select_station(station_number)
         ui.state.ensemble     = station_details['ensemble']
         ui.state.current_msg  = lcd_ui.MessageState.STATION
         logger.info(f'New station {station_number} {ui.state.station_name}/{ui.state.ensemble} selected')
         ui.reset_station_name_scroll()
+        ui.state.update_pad(" ")
 
 def update_msg(msg, sub_msg:str=""):
     ''' 
@@ -212,37 +218,66 @@ def initiate_scan(ui,player,audio_processor):
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
-    logger.info(f"Connected with result code {reason_code}")
+    '''
+    Run when connected to MQTT server
+    '''
+    logger.info(f"MQTT Connected: {reason_code}")
     # Subscribing in on_connect() means that if we lose the connection and
     # reconnect then subscriptions will be renewed.
     client.subscribe("dabble-radio/#")
 
-# The callback for when a PUBLISH message is received from the server.
 def on_message(client, userdata, msg, ui=None, audio_processor=None):
-    logger.info("MQTT Topic:%s - %s", msg.topic, str(msg.payload))
-    (base_topic, prop) = msg.topic.split("/",2)
+    '''
+    Callback on msg MQTT topic receive. Currently used to receive
+    comms from shairplay-sync (airplay)
+    '''
+    topic_components = msg.topic.split("/",2)
+    if len(topic_components)<2:
+        logger.info("Cannot parse MQTT Topic:%s - %s", msg.topic, payload)
+        return
+
+    base_topic = topic_components[0]
+    cmd        = topic_components[1]
+    payload    = msg.payload.decode("utf-8")
+    if payload == "1" or payload == "0":
+        # Convert payload to boolean
+        payload = payload == "1"
+
     if base_topic=="dabble-radio":
-        match prop:
+        match cmd:
             case "client_name":
-                client_name = str(msg.payload)
-                logger.info("Inbound Airplay connection from: %s", client_name)
+                ui.state.client_name = payload
+                logger.info("Inbound Airplay connection from: %s", ui.state.client_name)
+            case "playing":
+                logger.info("Airplay playing: %s", "yes" if payload else "no")
+                if ui.state.radio_state == menus.PlayerMode.AIRPLAY:
+                    logger.info("Airplay already playing or being pausing. Ignore")
             case "active_start":
                 logger.info("Airplay activated, Radio should shutdown")
                 ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
+                ui.state.last_station_name = ui.state.station_name 
+                ui.state.station_name = "?"
                 player.stop()
             case "active_end":
-                logger.info("Airplay deactivated, Radio should start up again")
+                logger.info("Airplay deactivated, Radio should start up again. Station: %s", ui.state.last_station_name)
                 ui.state.radio_state.mode = menus.PlayerMode.RADIO
+                ui.state.station_name = ui.state.last_station_name 
                 player.play(ui.state.station_name)
             case "album":
-                logger.info("Airplay %s: %s", prop, str(msg.payload))
-                ui.state.album = str(msg.payload)
-            case "track":
-                logger.info("Airplay %s: %s", prop, str(msg.payload))
-                ui.state.track = str(msg.payload)
+                logger.info("Airplay %s: %s", cmd, payload)
+                ui.state.album = payload
+            case "track" | "title":
+                logger.info("Airplay %s: %s", cmd, payload)
+                ui.state.track = payload
+                ui.state.update_pad(ui.state.track)
             case "artist":
-                logger.info("Airplay %s: %s", prop, str(msg.payload))
-                ui.state.artist = str(msg.payload)
+                logger.info("Airplay %s: %s", cmd, payload)
+                ui.state.artist = payload
+                ui.state.station_name = ui.state.artist
+            case _:
+                logger.info("Unhandled MQTT Topic:%s - %s", msg.topic, payload)
+    else:
+        logger.info("Unexpected MQTT Topic:%s - %s", msg.topic, payload)
 
 #########################################################
 # MAIN
@@ -256,25 +291,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.info("Dabble Radio initialising")
 
-
-
 ui = None
 try:
-    ui=lcd_ui.LCDUI(
-        base_font_path="noto/NotoSans_SemiCondensed", 
-        station_font_style="SemiBold",
-        station_font_size=20,
-        menu_font_style="SemiBold",
-        menu_font_size=18,
-        menu_font_sml_size=16
-    )
+    ui=lcd_ui.LCDUI()
+    ui.init_fonts()
 except exceptions.FontException:
     logging.fatal("Cannot load fonts")
     shutdown(mqttc=mqttc)
     sys.exit()
 
-# Display startup message
-ui.show_startup()
+# Set up state machine
+ui.state.radio_state = menus.RadioMachine()
 
 # Initialise stations and player
 logger.info("Loading radio stations")
@@ -293,8 +320,12 @@ except exceptions.NoRadioStations as e:
 logger.info("Loading saved state")
 current_config = state.load_state(ui.state)
 
-# Set up state machine
-ui.state.radio_state = menus.RadioMachine()
+if theme := ui.state.theme.load_theme(ui.state.theme_name):
+    ui.state.theme = theme
+
+# Display startup message
+ui.show_startup()
+time.sleep(2)
 
 # Set up encoders and buttons
 ui.state.left_encoder  = encoder.Encoder(
@@ -340,7 +371,7 @@ ui.state.lm.add_menu("Exit").action(lambda: exit_menu(encoder.EncoderPosition.LE
 
 ui.state.rm = menus.Menu()
 ui.state.rm.add_menu("Radio Mode", init_state="On" if ui.state.radio_state.mode == menus.PlayerMode.RADIO  else "Off")\
-        .action(lambda: ui.state.radio_state.update("mode",menus.PlayerMode.RADIO))\
+        .action(lambda: ui.state.radio_state.update("mode", menus.PlayerMode.RADIO))\
         .change_state(lambda: "On" if ui.state.radio_state.mode == menus.PlayerMode.RADIO else "Off")
 
 ui.state.rm.add_menu("Airplay Mode", init_state="On" if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY  else "Off")\
@@ -357,8 +388,9 @@ ui.state.left_encoder.set_colour_by_rgb(ui.state.left_led_rgb)
 # TODO: What mode are we starting in???
 logger.info(f'Begin playing {ui.state.station_name}')
 player.play(ui.state.station_name)
-ui.state.station_name = player.playing
-ui.state.ensemble     = player.ensemble
+ui.state.last_station_name = player.playing
+ui.state.station_name      = player.playing
+ui.state.ensemble          = player.ensemble
 ui.update()
 
 logger.info("Audio processing initialising")
@@ -383,9 +415,12 @@ ui.state.right_encoder.device.when_rotated_counter_clockwise = lambda: ui.state.
 mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqttc.on_connect = on_connect
 mqttc.on_message = lambda client,userdata,msg: on_message(client, userdata, msg, ui=ui, audio_processor=audio_processor)
-#mqttc.on_message = on_message
-mqttc.connect("localhost", 1883, 60)
-mqttc.loop_start()
+try:
+    mqttc.connect("localhost", 1883, 60)
+except ConnectionRefusedError as e:
+    logger.fatal("Cannot connect to MQTT")
+else:
+    mqttc.loop_start()
 
 # Lets start the party....
 logger.info("Radio main loop starting")
@@ -407,10 +442,7 @@ try:
 
             elif updates.is_updated('pad_label'):
                 pad = updates.get('pad_label').value
-                if ui.state.last_pad_message == "":
-                    ui.state.last_pad_message = pad
-                else:
-                    ui.state.next_pad_message = pad
+                ui.state.update_pad(pad)
                 ui.state.awaiting_signal = False
                 logger.info(f"PAD msg: \"{pad}\"")
 
@@ -426,7 +458,8 @@ try:
 
         # Draw the UI
         ui.draw_interface()
-        time.sleep(0.01)
+        # time.sleep(0.001)
+
     # end while
 except (KeyboardInterrupt,SystemExit):
     audio_processor.stream.close()
