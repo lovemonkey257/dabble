@@ -148,7 +148,7 @@ class RadioPlayer():
             queue.put(line.decode().replace("\n",""))
         stream.close()
 
-    def play(self,name):
+    def play(self,name) -> bool:
         logger.info("Player starting")
 
         self.dablin_stderr_q = Queue()
@@ -158,7 +158,14 @@ class RadioPlayer():
         self._recv_errors=0
         self.playing = name
 
-        (self.channel,self.sid,self.ensemble) = self.radio_stations.tuning_details(name)
+        if (station_details:=self.radio_stations.tuning_details(name)) is not None:
+            logger.info("Station details: %s", station_details)
+            (self.channel, self.sid, self.ensemble) = station_details
+        else:
+            # Name of station wrong/not found. This should not happen
+            logger.warn("Station name error: %s", name)
+            return False
+
         # This is run in parallel so will not block
         # Sound sent straight to sound card
         self.dablin_proc=subprocess.Popen(
@@ -200,6 +207,7 @@ class RadioPlayer():
         self._t_dablin_log_parser.start()
 
         logger.info("Player playing")
+        return True
 
 
     def stop(self):
