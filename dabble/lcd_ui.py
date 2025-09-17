@@ -128,6 +128,9 @@ class UIState():
 
     colors:dict                    = field(default_factory=dict)
     theme:UITheme                  = field(default_factory=UITheme)
+
+    fps:int                        = 0 # Frames Per Sec
+    render_time:int                = 0 # Time (in ms) taken to render LCD display
     
     def update(self, prop, value):
         '''
@@ -430,10 +433,15 @@ class LCDUI():
 
 
     def clear_levels(self, y:int=1):
-        # Clear the top part of the screen
+        '''
+        Clear the levels
+        '''
         self.draw.rectangle((0,y,self.WIDTH,y+3), (0, 0, 0))
 
     def draw_levels(self, l:int, r:int, y:int=1, decay:int=1, rainbow:bool=False):
+        '''
+        Draw levels
+        '''
         c=self.WIDTH/2
         y=self.HEIGHT-1
         lx1=c-l-1
@@ -476,6 +484,7 @@ class LCDUI():
     def draw_status(self, t:str, clear:bool=True):
         '''
         Draw Status. Use full bottom line
+        For Airplay scroll Album name if too long
         '''
         if t=='' or t is None:
             t=" "
@@ -630,42 +639,44 @@ class LCDUI():
         return c * math.log(float(1 + f),10);
 
 
-    def fft(self, signal, is_mono:bool=False, use_window:bool=True, use_db_scale:bool=False, low_pass_cutoff:float=10000.0):
+    def fft(self, signal, is_mono:bool=False, use_window:bool=False, use_db_scale:bool=False, low_pass_cutoff:float=12000.0):
         '''
         Calc FFT of signal and process so we can visualise it.
+        This is quick but processor intensive
+
         TODO: Move to audio_processing
         '''
-        # Convert to mono, and use float to avoid int overflows
+        # Convert to mono
         if not is_mono:
-            mono_signal = (signal[0::2].astype(np.float32) + signal[1::2].astype(np.float32)) / 2.0 
-            mono_signal = mono_signal.astype(np.int16)
+            mono_signal = (signal[0::2] + signal[1::2]) / 2
         else:
             mono_signal = signal
 
-        # Use lowpass filter to enhance lower frequencies so viz as more life
+        # Use lowpass filter to enhance lower frequencies so viz as more energy
         if low_pass_cutoff>0.0:
-            nyq = self.state.audio_processor.sample_rate/2
-            normalised_cutoff = low_pass_cutoff / nyq
-            b, a = butter(4, normalised_cutoff, btype='low', analog=False)
-            mono_signal = filtfilt(b, a, mono_signal)  # Zero-phase filtering
+            nyq_freq = float(self.state.audio_processor.sample_rate)/2.0
+            normalised_cutoff = low_pass_cutoff/nyq_freq
+            b, a  = butter(4, normalised_cutoff, btype='lowpass', analog=False)
+            mono_signal = filtfilt(b, a, mono_signal)
 
         # FFT magic
         # Window to reduce spectral oddities
         windowed_signal = mono_signal * np.hanning(len(mono_signal)) if use_window else mono_signal
         fft_data        = np.fft.rfft(windowed_signal)
+
+        # FFT spectrum seems to be repeated so take what looks like
+        # first "chunk" of repeated data
+        fft_spectrum = fft_data[0:256]
+
         # Normalise fft, as values can be very large so we scale
-        fft_spectrum    = np.abs(fft_data/1024)
+        fft_spectrum    = np.abs(fft_spectrum/1024)
+
         if use_db_scale:
             # While accurate, looks rubbish
             fft_spectrum = 20 * np.log10(fft_spectrum + 1e-6)
 
-        # FFT spectrum seems to be repeated so take what looks like
-        # first "chunk" of repeated data
-        fft_spectrum = fft_spectrum[0:256]
-
         # Max value
         max_magnitude = np.max(fft_spectrum)
-
         return (max_magnitude, fft_spectrum)
 
 
@@ -748,7 +759,8 @@ class LCDUI():
             if end > len(fft_spectrum):
                 end = len(fft_spectrum)
             # Aggregate magnitude within the bin
-            bar_value  = np.max(fft_spectrum[start:end])
+            # For first bar (bass) use mean as it looks better
+            bar_value  = np.max(fft_spectrum[start:end]) if x>0 else np.mean(fft_spectrum[start:end])
             bar_height = int(bar_value * scale)
             x1 = x * bar_width
             x2 = x1 + bar_width - 2
