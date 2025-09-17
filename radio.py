@@ -10,12 +10,19 @@ import json
 import logging
 import time
 import sys
+import threading
 from enum import Enum
 from pathlib import Path
 import paho.mqtt.client as mqtt
 
 from dabble import (audio_processing, encoder, exceptions, keyboard, lcd_ui,
                     radio_player, radio_stations, menus, state)
+
+# TODO: Feels wrong here! mmmm
+# Lock to protect station changes
+# Rapid turns of encoder can result in multiple callbacks
+# and strange station choices
+station_lock = threading.Lock()
 
 def shutdown(ui=None,kb=None,player=None, mqttc=None):
     if mqttc:
@@ -124,7 +131,7 @@ def activate_or_run_menu(state, encoder_position):
         selected_encoder.device.when_rotated_counter_clockwise = lambda: prev_menu(state, curr_menu)
         state.current_menu_item=curr_menu.get_first_menu_item()
         logging.info("Menu currently selected: %s", state.current_menu_item)
-        state.menu_timer = menus.PeriodicTask(interval=8, callback=lambda:exit_menu(encoder_position, ui, player, audio_processor))
+        state.menu_timer = menus.PeriodicTask(interval=8, name="menu_timer", callback=lambda:exit_menu(encoder_position, ui, player, audio_processor))
         state.menu_timer.run()
 
     elif state.radio_state.selecting_a_menu.is_active:
@@ -135,11 +142,19 @@ def play_new_station(ui,player,audio_processor):
     '''
     New station selected, now play it
     '''
-    logging.info("New Station selected...changing audio")
     # Cancel timer
     ui.state.station_timer.terminate()
+
     # Back to playing
     ui.state.radio_state.toggle_select_station()
+
+    # TODO: If same station do nothing
+    if player.playing == ui.state.station_name:
+        logger.info("User selected same station. Will ignore")
+        return
+
+    audio_processor.zero_signal()
+    logging.info("New Station selected...changing audio")
 
     # Pause streaming ...
     audio_processor.stream.stop_stream()
@@ -151,6 +166,7 @@ def play_new_station(ui,player,audio_processor):
     # Resume playing
     audio_processor.stream.start_stream()
 
+    ui.state.update_pad(" ")
     ui.state.dab_type = ""
     ui.state.last_pad_message = ""
     logger.info(f'Now playing {ui.state.station_name}')
@@ -164,33 +180,34 @@ def change_station(ui,player,audio_processor):
     TODO: Do we need to press encoder to select or auto select or
           is it configurable?
     '''
-    if ui.state.radio_state.playing.is_active or \
-       not ui.state.radio_state.left_menu_activated.is_active and \
-       not ui.state.radio_state.right_menu_activated.is_active and \
-       not ui.state.radio_state.selecting_a_station.is_active:
-        # If we're entering station selection ..
-        # Change into select_station state
-        ui.state.radio_state.toggle_select_station()
-        # Set up timeout timer which changes station once stopped selecting
-        ui.state.station_timer = menus.PeriodicTask(interval=4, callback=lambda:play_new_station(ui,player,audio_processor))
-        ui.state.station_timer.run()
-        logger.info("Start changing station..")
+    with station_lock:
+        if ui.state.radio_state.playing.is_active or \
+           not ui.state.radio_state.left_menu_activated.is_active and \
+           not ui.state.radio_state.right_menu_activated.is_active and \
+           not ui.state.radio_state.selecting_a_station.is_active:
+            # If we're entering station selection ..
+            # Change into select_station state
+            ui.state.radio_state.toggle_select_station()
+            # Set up timeout timer which changes station once stopped selecting
+            ui.state.station_timer = menus.PeriodicTask(interval=4, name="station_select_timer", callback=lambda:play_new_station(ui,player,audio_processor))
+            ui.state.station_timer.run()
+            logger.info("Start changing station..")
 
-    if ui.state.radio_state.selecting_a_station.is_active:
-        # still twiddling so reset timeout
-        ui.state.station_timer.reset()
-        # Get index of station in list and correct given current station
-        left_encoder_value = ui.state.left_encoder.device.steps
-        station_number = left_encoder_value + player.radio_stations.station_index(player.playing)
+        if ui.state.radio_state.selecting_a_station.is_active:
+            # still twiddling so reset timeout
+            ui.state.station_timer.reset()
+            # Get index of station in list and correct given current station
+            left_encoder_value = ui.state.left_encoder.device.steps
+            station_index  = player.radio_stations.station_index(player.playing)
+            station_number = left_encoder_value + station_index
+            logger.info("Left Encoder Steps: %d  Current Station Index: %d, will choose %d", left_encoder_value, station_index, station_number)
 
-        # Get the new station name and details
-        audio_processor.zero_signal()
-        (ui.state.station_name, station_details)=player.radio_stations.select_station(station_number)
-        ui.state.ensemble     = station_details['ensemble']
-        ui.state.current_msg  = lcd_ui.MessageState.STATION
-        logger.info(f'New station {station_number} {ui.state.station_name}/{ui.state.ensemble} selected')
-        ui.reset_station_name_scroll()
-        ui.state.update_pad(" ")
+            # Get the new station name and details
+            (ui.state.station_name, station_details)=player.radio_stations.select_station(station_number)
+            ui.state.ensemble     = station_details['ensemble']
+            ui.state.current_msg  = lcd_ui.MessageState.STATION
+            logger.info(f'New station {station_number} {ui.state.station_name}/{ui.state.ensemble} selected')
+            ui.reset_station_name_scroll()
 
 def update_msg(msg, sub_msg:str=""):
     ''' 
@@ -279,6 +296,33 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None):
     else:
         logger.info("Unexpected MQTT Topic:%s - %s", msg.topic, payload)
 
+def pad_update_handler(updates):
+    if updates.is_updated('no_signal'):
+        ui.state.have_signal = False
+        ui.state.awaiting_signal = False
+
+    elif updates.is_updated('dab_type'):
+        ui.state.dab_type=updates.get('dab_type').value
+        logger.info(f"DAB type: {ui.state.dab_type}")
+        ui.state.have_signal     = True
+        ui.state.awaiting_signal = False
+
+    elif updates.is_updated('pad_label'):
+        pad = updates.get('pad_label').value
+        ui.state.update_pad(pad)
+        ui.state.awaiting_signal = False
+        logger.info(f"PAD msg: \"{pad}\"")
+
+    elif updates.is_updated('media_fmt'):
+        ui.state.awaiting_signal = False
+        ui.state.audio_format = updates.get('media_fmt').value
+        logger.info(f"Audio format: \"{ui.state.audio_format}\"")
+
+    elif updates.is_updated('prog_type'):
+        ui.state.awaiting_signal = False
+        ui.state.genre = updates.get('prog_type').value
+        logger.info(f"Genre: \"{ui.state.genre}\"")
+
 #########################################################
 # MAIN
 #########################################################
@@ -308,7 +352,9 @@ logger.info("Loading radio stations")
 stations=radio_stations.RadioStations()
 
 logger.info("Initialising player")
-player=radio_player.RadioPlayer(radio_stations=stations)
+player=radio_player.RadioPlayer(
+        radio_stations=stations, 
+        pad_update_handler = pad_update_handler)
 
 # Load stations. If none then initiate scan
 try:
@@ -427,40 +473,24 @@ logger.info("Radio main loop starting")
 ui.reset_station_name_scroll()
 
 try:
+    # Calc FPS and Render times
+    fps=0
+    fps_st=time.time()
     while True:
-        # TODO: Convert updates to callback?
-        if updates := player.dablin_log_parser.updates():
-            if updates.is_updated('no_signal'):
-                ui.state.have_signal = False
-                ui.state.awaiting_signal = False
-
-            elif updates.is_updated('dab_type'):
-                ui.state.dab_type=updates.get('dab_type').value
-                logger.info(f"DAB type: {ui.state.dab_type}")
-                ui.state.have_signal     = True
-                ui.state.awaiting_signal = False
-
-            elif updates.is_updated('pad_label'):
-                pad = updates.get('pad_label').value
-                ui.state.update_pad(pad)
-                ui.state.awaiting_signal = False
-                logger.info(f"PAD msg: \"{pad}\"")
-
-            elif updates.is_updated('media_fmt'):
-                ui.state.awaiting_signal = False
-                ui.state.audio_format = updates.get('media_fmt').value
-                logger.info(f"Audio format: \"{ui.state.audio_format}\"")
-
-            elif updates.is_updated('prog_type'):
-                ui.state.awaiting_signal = False
-                ui.state.genre = updates.get('prog_type').value
-                logger.info(f"Genre: \"{ui.state.genre}\"")
-
-        # Draw the UI
+        t1=time.time_ns()
         ui.draw_interface()
-        # time.sleep(0.001)
-
+        t2=time.time_ns()
+        render_time = ((t2-t1)/1000000)
+        fps_et=time.time()
+        if fps_et-fps_st>=1:
+            fps_st=time.time()
+            ui.state.fps = fps
+            ui.state.render_time = render_time
+            logging.debug("FPS: %d %dms", fps, render_time)
+            fps=0
+        fps+=1
     # end while
+
 except (KeyboardInterrupt,SystemExit):
     audio_processor.stream.close()
     audio_processor.p.terminate()
