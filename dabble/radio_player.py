@@ -65,6 +65,9 @@ class DablinLogParser():
         self._recv_errors = 0
         self._updates = None
 
+        # Callback to handle updates
+        self.pad_update_handler = None
+
     def _get_line_from_q(self, recd_threshold:int=255):
             s=""
             recd=0
@@ -108,13 +111,20 @@ class DablinLogParser():
             while True:
                 if self._end_task.is_set():
                     break
+
+                have_updates=False
                 with self._updates_lock:
-                    #self._updates = self._parse_dablin_output()
                     k,v = self._parse_dablin_output()
                     logger.debug("k:%s  v:%s", k, v)
                     if k is not None:
+                        have_updates=True
                         self._updates.update(k,v)
+
+                # Callback?
+                if self.pad_update_handler is not None and have_updates:
+                    self.pad_update_handler(self.updates())
                 time.sleep(0.1)
+
         except KeyboardInterrupt as e:
             pass
         return
@@ -123,8 +133,11 @@ class DablinLogParser():
         with self._updates_lock:
             return copy(self._updates)
 
+
 class RadioPlayer():
-    def __init__(self, radio_stations:radio_stations.RadioStations=None):
+    def __init__(self, 
+                 radio_stations:radio_stations.RadioStations=None,
+                 pad_update_handler:object=None):
         self.dablin_proc = None
         self.playing = "Not Playing Yet"
         self.ensemble=""
@@ -132,10 +145,9 @@ class RadioPlayer():
         self.sid=""
         self.radio_stations = radio_stations
         self.multiplexes = list()
-        # signal.signal(signal.SIGINT, self.signal_handler)
-
         self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I')
         self.scan_cmdline=Template('/usr/local/bin/eti-cmdline-rtlsdr -J -x -C $block -D $scantime -Q')
+        self._pad_update_handler = pad_update_handler
 
     def signal_handler(self, sig, frame):
         print('You pressed Ctrl+C!')
@@ -154,6 +166,7 @@ class RadioPlayer():
         self.dablin_stderr_q = Queue()
         self._stop_log_parser_event = Event()
         self.dablin_log_parser = DablinLogParser(self.dablin_stderr_q,  self._stop_log_parser_event)
+        self.dablin_log_parser.pad_update_handler = self._pad_update_handler
 
         self._recv_errors=0
         self.playing = name
@@ -167,7 +180,7 @@ class RadioPlayer():
             return False
 
         # This is run in parallel so will not block
-        # Sound sent straight to sound card
+        # Sound sent straight to sound card via SDL
         self.dablin_proc=subprocess.Popen(
             shlex.split(
                 self.play_cmdline.substitute({
@@ -178,8 +191,9 @@ class RadioPlayer():
             stderr=subprocess.PIPE
         )
         '''
-        There does not seem to be a DAB signal here
+        Messages from dablin/eti_cmdline:
 
+        There does not seem to be a DAB signal here
         FICDecoder: SId 0xCFE8: audio service (SubChId  4, DAB+, primary)
         FICDecoder: SId 0xC4CD: audio service (SubChId 17, DAB+, primary)
         EnsemblePlayer: playing sub-channel 4 (DAB+)
@@ -208,7 +222,6 @@ class RadioPlayer():
 
         logger.info("Player playing")
         return True
-
 
     def stop(self):
         self.currently_playing = None
