@@ -1,28 +1,61 @@
-# dabble
-A DAB radio project based on a PI, a small LCD and some LED encoders. The core software is based on the good work of dablin and eti-stuff. It is very much a work in progress.
+# Dabble Radio
+A DAB radio project based on a PI, RTLDSR, a small LCD and some LED encoders. The core software is based on the good work of dablin and eti-stuff and it is very much a work in progress.
 
-This project is targetted to be run on a Raspberry Pi running Raspberry OS (this could change). Assumptions reqarding packages etc rely on this. While the hardware could be run on another system using I2C and I2S I've not tested this. 
+This project is targetted to be run on a Raspberry Pi running Raspberry Lite OS (this could change). Assumptions reqarding packages etc rely on this. While the hardware could be run on another system using I2C and I2S I've not tested this.  
 
+### Features
+- DAB and DAB+ reception
+- Station name scroll
+- Ensemble displayed and DAB type
+- Airplay works, Album, Track and Artist are displayed
+- Graphic equaliser works in both Radio and Airplay modes
+- Bar Graphic equaliser works in both Radio and Airplay modes
+- TODO: Update graphics below - they're a little dated.
+    
+![alt text](docs/playing.png)
+![alt text](docs/waveform.png)
+
+- PAD messages updated
+
+![alt text](docs/pad-msg.png)
+
+- Menus work
+- Volume works using linear and log scale (seems more natural). Need to add config to toggle this
+- Station selection works
+- Station scanning works, although need to decide how to handle default list of channels to scan
+- Also captures audio format and genre but not currently displayed
+- Can be themed but functionality not exposed yet
+  
 ## Current progress and Features
-- UI seems stable
-- Moved to USB sound card. The Adafruit speakerbonnet/amp works fine now and can capture audio but still have hugh problems with volume control.
-- Airplay via shairplay-sync works and sound switched between radio and airplay
+- It all works
+- DAB and DAB+ radio stations can be played
+- Scanning for stations works
+- Left encoder selects stations or used to change visualisations
+- Right encoder changes volume or used to scan or select mode
+- Can seamlessly move from Radio to Airplay and vice-versa
+- In airplay mode, displays album, track and artist
+- Volume works in both modes
+- Visualisations work in both modes
+- Some issues with menus for right encoder. Needs debugging
+- FFT works but need to double check it's doing what I think it is.
 
 ## Components
-- Raspberry Pi 5. I tried the Pi Zero 2 but the speaker bonnet and ALSA/Pulseaudio did not play nicely. I'll come back to this.
+- Raspberry Pi 5. I tried the Pi Zero 2 but it doesn't have enough processing power if visualisations are used.
+- Gave up on the Adafruit Speaker Bonnet and now using a USB sound card which is much more reliable
 - [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
 - 2 x [Fermion EC11 encoders](https://thepihut.com/products/fermion-ec11-rotary-encoder-module-breakout). These work well and I'm using these instead of the pretty one.
-- 1 x [Adafruit Speaker Bonnet](https://www.adafruit.com/product/3346). Can use 3W 8Ohm speakers which should be powerful enough
 - NESDR Nano 2+ (but any RTLSDR should do)
+- Tecknet USB sound card. Cheap, functional and sounds "good enough". This isn't a audiophile project.
 - No idea about an enclosure yet. Will prototype it in thin MDF
 
 ## Software
 - UI and controller written in python
 - Modified version of of eti-cmdline from JvanKatwijk to enable scans. Forked here https://github.com/lovemonkey257/eti-stuff
 - Modified version of dablin from Opendigialradio so I can get PAD messages in cli version, https://github.com/lovemonkey257/dablin
-- Shairplay-sync, built from souce
+- Shairplay-sync, built from souce. Will try to move back to podman
+- Have to use pulse so audiocard can be shared
 
-## Capture Audio from Adafruit Speaker Bonnet
+## Deprecated - Capture Audio from Adafruit Speaker Bonnet
 The driver for the speaker bonnet does not present a recording interface - its playback only. This
 is a problem for me as I sample the sound to display the visualiser.
 
@@ -46,28 +79,6 @@ sound from. I found that the SDL sub-system picked this up automatically and I d
 Eventually I gave up on the Bonnet and switched to a USB sound card. I'll use external speakers
 as there were too many problems with the Bonnet, not limited to volume control (when used with 
 pipewire) and the above issue, which I solved but added complexity. YMMV.
-
-### Features
-- DAB and DAB+ reception
-- Station name scroll
-- Ensemble displayed and DAB type
-- Waveform visualiser works (not anymore??)
-- Graphic equaliser works
-- Bar Graphic equaliser works
-- Airplay works (need to fix display of track name etc)
-
-![alt text](docs/playing.png)
-![alt text](docs/waveform.png)
-
-- PAD messages updated
-
-![alt text](docs/pad-msg.png)
-
-- Menus work
-- Volume works using log scale (seems more natural). Need to add config to toggle this
-- Station selection works
-- Station scanning works, although need to decide how to handle default list of channels to scan
-- Also captures audio format and genre but not currently displayed
 
 ## Current problems:
 - Proper build perhaps into containers
@@ -99,9 +110,6 @@ On click:
     - Country/Language?? Selects ensemble channels
     - Possibly more
 - If nothing selected for more than 5 secs revert to play screen
-
-## Ideas
-- Turn this into a mini streamer e.g. run shareport-sync et al?
 
 # Build
 Install Raspberry Pi Lite, no GUI needed, minimal install.
@@ -267,6 +275,9 @@ mqtt = {
 - Enable avahi-daemon `sudo systemctl enable avahi-daemon && sudo systemctl start avahi-daemon` 
 - Enable shairport-sync `systemctl --user enable shairport-sync.service && systemctl --user start shairport-sync.service`
 
+## MQTT
+TODO: How to run mqtt in rootless podman
+
 ## Dabble
 As this needs system installed packages create requirements as follows:
 
@@ -291,8 +302,9 @@ Saved state is saved into `dabble_radio.json" e.g.
     "pulse_left_led_encoder": false,
     "pulse_right_led_encoder": false,
     "enable_visualiser": true,
-    "visualiser": "waveform",
-    "enable_levels": false
+    "visualiser": "graphic_equaliser",
+    "enable_levels": false,
+    "theme_name": "default"
 }
 ```
 TODO: What else might need external configuration? Other config settings that should
@@ -305,8 +317,8 @@ The zip installs under a dir called `static` which you should rename to `noto`.
 
 ## Running
 - cd into your dev dir
+- `./run-mqtt.sh`
 - `source ./venv/bin/activate`
-- `./init-sound-system.sh`
 - `python radio.py`
 
 ### Left Encoder
