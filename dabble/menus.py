@@ -157,6 +157,7 @@ class Menu():
         if menu_item.menu_id in self.actions:
             logger.info("Running action for %s",menu_item)
             r = self.actions[menu_item.menu_id]()
+
         if menu_item.menu_id in self.state_update:
             # Trigger update callbacks for all menus
             logger.info("Running state update for %s",menu_item)
