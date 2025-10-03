@@ -68,7 +68,7 @@ class AudioProcessing():
         self.rec_channels = self.record_dev['maxInputChannels']
         self.frames_chunk_size = frame_chunk_size 
 
-        logging.info("Using %s (index:%d)", self.record_dev_name, self.record_dev_index)
+        logger.info("Using %s (index:%d)", self.record_dev_name, self.record_dev_index)
         logger.info("Sample Rate: %d", self.sample_rate)
         logger.info("Channels:    %d", self.rec_channels)
         logger.info("Chunk Size:  %d", self.frames_chunk_size)
@@ -84,76 +84,97 @@ class AudioProcessing():
             self.mixer = alsaaudio.Mixer()
             logger.info("Using default mixer")
 
+        volcap = self.mixer.volumecap()
+        logger.info("Volume caps: %s", ",".join(volcap))
+
         self.stream:pyaudio.Stream = None
         # Callback updates this so need locking to protect it
         self._signal = np.zeros(4096)
-        self.volume=2
-        self.ch_l = None
-        self.ch_r = None
-        self.peak_l = 0
-        self.peak_r = 0
-        self.channel = alsaaudio.MIXER_CHANNEL_ALL
-        self.set_volume(self.volume)
-        logger.info("Volume set to %d", self.volume)
+    
+        self.ch_l    = None
+        self.ch_r    = None
+        self.peak_l  = 0
+        self.peak_r  = 0
+
+        # Volume is the % value
+        # We assume joined volume which is the natual way to change vol
+        self.min_volume = 10
+        self.max_volume = 90
+        self.set_volume()
+        logger.info("Volume set to %d", self.volume())
+
         self.audio_format   = pyaudio.paInt16 # pyaudio.paFloat32
         self.audio_bit_size = np.int16        # np.float32
         self._max_value     = 2**16           # Unless its a float??
         self._lock = threading.Lock()
 
     def signal(self) -> np.ndarray:
+        '''
+        Return a copy of the current signal buffer
+        We use lock/copy as another thread maybe updating it
+        '''
         s=None
         with self._lock:
             s=self._signal.copy()
-            #s=deepcopy(self._signal) # .copy()
         return s
 
     def zero_signal(self):
+        '''
+        Set the signal buffer to zero
+        '''
         with self._lock:
             self._signal = np.zeros(4096)
 
-    def log_volume(self, level:int, max_steps:int=60) -> int:
-        """
-        Map linear encoder position to logarithmic volume.
-        Uses y = 100 * (x / max)^3 as an approximation for perceptual loudness.
-        """
-        x = level / max_steps           # Normalize to 0-1
-        log_val = max_steps * (x ** 2)  # Cubic curve for logarithmic perception
-        return int(log_val)       
+    def magnitude_to_db(self,magnitude:int|float, reference:float=1.0) -> int:
+        '''
+        Given a magnitude return dB FS (as ref = 1) otherwise return db SPL
+        Will return negative numbers
+        '''
+        return int(20 * log10(magnitude/reference))
 
     def vol_up(self, inc:int=2):
         with self._lock:
-            self.set_volume(vol=self.volume+inc)
-            v=self.volume
+            v = min(self.volume() + inc, self.max_volume)
+            self.set_volume(v)
         return v
 
     def vol_down(self, inc:int=2):
         with self._lock:
-            self.set_volume(vol=self.volume-inc)
-            v=self.volume
+            v = max(self.volume() - inc, self.min_volume)
+            self.set_volume(v)
         return v
-    
-    def set_volume(self, vol:int=-1, use_log:bool=False):
-        self.volume=vol
-        # Make sure it's in range
-        if self.volume<10:
-            self.volume=10
-        elif self.volume>80:
-            self.volume=80
+   
+    def volume(self):
+        '''
+        Return current ALSA playback volume
+        '''
+        return self.mixer.getvolume(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_PERCENTAGE)[0]
 
-        actual_vol = self.log_volume(self.volume) if use_log else self.volume
-        if actual_vol<10:
-            actual_vol=10
-        elif actual_vol>80:
-            actual_vol=80
-        self.mixer.setvolume(actual_vol, self.channel)
+    def set_volume(self, vol:int=20):
+        '''
+        Set the ALSA volume for both stereo channels, using a percentage
+        '''
+        v=vol
+        # Make sure it's in range
+        if v<self.min_volume:
+            v=self.min_volume
+        elif v>self.max_volume:
+            v=self.max_volume
+        logger.debug(f'Setting volume to {v}%')
+        self.mixer.setvolume(v, 
+                units=alsaaudio.VOLUME_UNITS_PERCENTAGE, 
+                channel=alsaaudio.MIXER_CHANNEL_ALL)
+
+    def rms(self, signal):
+        return np.sqrt(np.abs(np.mean(np.square(signal))))
 
     def sound_data_avail_callback(self, in_data, frame_count, time_info, status):
         with self._lock:
             self._signal = np.frombuffer(in_data, dtype=self.audio_bit_size)
             self.ch_l    = self._signal[0::2]
             self.ch_r    = self._signal[1::2]
-            self.peak_l  = np.abs(np.max(self.ch_l))/self._max_value*100.0
-            self.peak_r  = np.abs(np.max(self.ch_r))/self._max_value*100.0        
+            self.peak_l  = int(np.abs(np.max(self.ch_l))/self._max_value*100.0)
+            self.peak_r  = int(np.abs(np.max(self.ch_r))/self._max_value*100.0)
         return (None, pyaudio.paContinue)
 
     def start(self):
@@ -190,7 +211,7 @@ class AudioProcessing():
         d = self.stream.read(self.frames_chunk_size, exception_on_overflow=False)
         with self._lock:
             self._signal = np.frombuffer(d,dtype=self.audio_bit_size)
-        logging.debug("Latency %0.3fs Frames avail to read: %d", self.stream.get_input_latency(), self.stream.get_read_available())
+        logger.debug("Latency %0.3fs Frames avail to read: %d", self.stream.get_input_latency(), self.stream.get_read_available())
         return True
 
     def get_peaks(self) -> tuple[float,float]:
