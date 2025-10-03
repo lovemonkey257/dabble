@@ -106,6 +106,7 @@ class UIState():
     peak_l:int           = 0
     peak_r:int           = 0
     audio_processor:object = None
+    volume_change_step:int = 1  # Vol inc/decs in this value
 
     left_encoder:encoder.Encoder   = None
     right_encoder:encoder.Encoder  = None
@@ -358,7 +359,7 @@ class LCDUI():
                 self.scroll_station_name()
 
             if self.state.awaiting_signal:
-                self.state.last_pad_message = ".."
+                self.state.last_pad_message = ""
             elif not self.state.have_signal:
                 self.state.last_pad_message = "No Signal"
 
@@ -628,8 +629,8 @@ class LCDUI():
                 (x + bar_margin, bar_y), 
                 (x + width - bar_margin, bar_y + bar_height)], self.state.theme.volume_bg)
 
-            # Bar fill
-            fill_width = int((width - 2 * bar_margin) * (volume / max_volume))
+            # Bar fill - ensure volume is +ve
+            fill_width = int((width - 2 * bar_margin) * (abs(volume) / max_volume))
             self.draw.rectangle([
                 (x + bar_margin, bar_y), 
                 (x + bar_margin + fill_width, bar_y + bar_height)], fill=self.state.theme.volume)
@@ -729,7 +730,7 @@ class LCDUI():
                 self.last_max_signal[x] -= fall_decay
 
 
-    def graphic_equaliser_bars(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=2, use_log_scale:bool=True, num_bars:int=32, is_mono:bool=False):
+    def graphic_equaliser_bars(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=True, num_bars:int=32, is_mono:bool=False):
         '''
         Show frequencies using fft, grouped into num_bars (default 32) bins.
         '''
