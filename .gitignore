@@ -1,6 +1,6 @@
 ensemble*.json
 station-list.json
-dabble_radio.json
+config.json
 sorted_stations.txt
 
 # Byte-compiled / optimized / DLL files

@@ -4,7 +4,7 @@ from pathlib import Path
 from dabble import (lcd_ui, menus)
 
 logger = logging.getLogger(__name__)
-config_path = Path("dabble_radio.json")
+config_path = Path("config.json")
 
 def load_state(state:lcd_ui.UIState):
     logger.info(f'Loading saved state from {config_path}')
