@@ -8,6 +8,7 @@ import time
 import st7735
 import json
 import numpy as np
+import dbus
 
 from dataclasses import dataclass, field
 from enum import Enum,StrEnum
@@ -67,7 +68,7 @@ class UITheme():
                         # Got one...
                         theme = UITheme(**themes[theme_name])
                         theme.name = theme_name
-                        logger.info("oooo Pretty. Theme loaded")
+                        logger.info("Theme loaded. Oooooo pretty....")
                     else:
                         logger.info("Theme %s not found", theme_name)
                 except Exception as e:
@@ -132,6 +133,9 @@ class UIState():
 
     fps:int                        = 0 # Frames Per Sec
     render_time:int                = 0 # Time (in ms) taken to render LCD display
+
+    shairport_dbus_interface:dbus.Interface  = None                          
+
     
     def update(self, prop, value):
         '''
@@ -179,6 +183,11 @@ class UIState():
         if self.next_pad_message!="":
             self.last_pad_message=self.next_pad_message
 
+    def __post_init__(self):
+        sys_dbus = dbus.SystemBus()
+        proxy = sys_dbus.get_object('org.gnome.ShairportSync', '/org/gnome/ShairportSync')
+        self.shairport_dbus_interface = dbus.Interface(proxy, 'org.gnome.ShairportSync.RemoteControl')
+
 
 class Timer():
     '''
@@ -219,6 +228,7 @@ class Timer():
 class LCDUI():
     '''
     Manage the LCD display and UI
+    Based on 0.96" ST7735 LCD from Pimoroni
 
     Origin is top left: (0,0)
     Bottom right:       (WIDTH,HEIGHT)
@@ -250,6 +260,7 @@ class LCDUI():
         self.HEIGHT        = self.disp.height
         self.CENTRE_HEIGHT = self.HEIGHT//2 
         self.CENTRE_WIDTH  = self.WIDTH//2
+        logging.info("LCD is %d wide x %d high", self.WIDTH, self.HEIGHT)
 
         self.img = Image.new('RGB', (self.WIDTH, self.HEIGHT), color=(0, 0, 0))
         self.draw = ImageDraw.Draw(self.img)
@@ -282,8 +293,11 @@ class LCDUI():
         return fp
 
     def init_fonts(self):
-        ## Fonts!
-        # Beware of style as it forms part of file name
+        '''
+        Init Fonts. Need to do this when you want new point size or font style
+
+        Beware of style as it forms part of file name
+        '''
         self.station_font_size  = self.state.theme.station_font_size
         self.ensemble_font_size = self.state.theme.ensemble_font_size
         self.menu_font_size     = self.state.theme.menu_font_size
@@ -304,16 +318,11 @@ class LCDUI():
             logging.error("Cannot load font: %s", self.base_font)
             raise exceptions.FontException
 
-
-    def load_theme(self, theme_name):
-        pass
-
-
     def draw_viz(self, with_lock:bool=False):
         '''
         Draw the visualiser
 
-        Inspiration winamp. Halcyon days
+        Inspiration winamp. Halcyon days eh
         '''
         if self.state.visualiser_enabled:
             # Only do something if enabled
@@ -343,7 +352,7 @@ class LCDUI():
             # Normal display
 
             # If we have no vis OR no signals then make sure we clear the station name area or
-            # we will get smudges
+            # we will get smudges as viz doesnt draw when no signal
             clear_sn = not self.state.visualiser_enabled or \
                        (self.state.audio_processor.peak_l==0 and self.state.audio_processor.peak_r==0)
 
@@ -358,25 +367,32 @@ class LCDUI():
                self.state.radio_state.right_menu_activated.is_active:
                 self.scroll_station_name()
 
+            # When waiting for signal set PAD to nothing or status
             if self.state.awaiting_signal:
                 self.state.last_pad_message = ""
             elif not self.state.have_signal:
                 self.state.last_pad_message = "No Signal"
 
+            # Draw the viz first, so we layer other text on top
             self.draw_viz()
 
+            # Now station name
             if self.state.station_enabled or self.state.radio_state.selecting_a_station.is_active:
                 self.draw_station_name(self.state.get_current_message(), clear=clear_sn)
             else:
                 self.draw_station_name(" ", clear=clear_sn)
 
+            # Now volume and mode
             self.draw_volume_bar(self.state.volume, x=0,y=vol_bar_y, height=4)   
             self.draw_mode(clear=True)
 
+            # Now Ensemble and DAB type (if in radio mode)
             if self.state.radio_state.mode == menus.PlayerMode.RADIO:
                 self.draw_ensemble(self.state.ensemble, clear=True)
                 self.draw_dab_type(self.state.dab_type, clear=True)
 
+            # Otherwise draw album name
+            # Scroll if too big
             elif self.state.radio_state.mode == menus.PlayerMode.AIRPLAY:
                 if len(self.state.album)>20:
                     self.scroll_status()
@@ -385,6 +401,7 @@ class LCDUI():
                     self.scrolling_status=False
                 self.draw_status(self.state.album)
 
+            # Now levels
             if not self.state.levels_enabled:
                 self.clear_levels() # y=vol_bar_y + 6)
             else:
@@ -394,18 +411,25 @@ class LCDUI():
                 self.draw.line((self.CENTRE_WIDTH, 0, self.CENTRE_WIDTH, self.HEIGHT),  fill='gray')
                 self.draw.line((0, self.CENTRE_HEIGHT, self.WIDTH, self.CENTRE_HEIGHT), fill='gray')
 
-            # Draw menu over dimmed image
+            # If we're selecting menus then dim background and draw current menu selection
+            # if menus are active draw over dimmed background
             dimmed_image=None
             if self.state.radio_state.left_menu_activated.is_active or \
                self.state.radio_state.right_menu_activated.is_active or \
-               self.state.radio_state.selecting_a_menu.is_active:
+               self.state.radio_state.selecting_left_menu.is_active or \
+               self.state.radio_state.selecting_right_menu.is_active:
+
                 dimmed_image= Image.eval(self.img, lambda x: x/4)
                 self.draw_menu(draw=ImageDraw.Draw(dimmed_image))
 
+            # Update image on LCD
             self.update(img=dimmed_image)
 
 
     def update(self,img=None):
+        '''
+        Update LCD. Use img or, or if none, the class image
+        '''
         if img is None:
             self.disp.display(self.img)
         else:
@@ -466,7 +490,7 @@ class LCDUI():
 
     def draw_mode(self, clear:bool=True):
         '''
-        Draw Mode
+        Draw Mode e.g. Airplay or Radio
         '''
         # Calc bounding box for all text
         t = "Radio Airplay"
@@ -498,9 +522,10 @@ class LCDUI():
             self.draw.rectangle((0,self.HEIGHT-text_height-4, self.WIDTH, self.HEIGHT), (0, 0, 0))
         self.draw.text( (text_x,self.HEIGHT), t, font=self.ensemble_font, fill=self.state.theme.ensemble, anchor="ld")
 
+
     def draw_ensemble(self, t:str, clear:bool=True):
         '''
-        Draw Ensemble. Divide bottom into 4 and Ensemble text consumes 3/4 of screen
+        Draw Ensemble. Divide bottom into 4. Ensemble text consumes 3/4 of screen
         '''
         (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(t, font=self.ensemble_font)
         split_point = self.WIDTH//4*3
@@ -511,7 +536,7 @@ class LCDUI():
 
     def draw_dab_type(self, t:str, clear:bool=True):
         '''
-        Draw DAB Type. Divide bottom into 4 and Type text consumes last 1/4 of screen
+        Draw DAB Type. Divide bottom into 4. Type text consumes last 1/4 of screen
         ''' 
         if t=="" or t is None:
             t="DAB"
@@ -538,13 +563,13 @@ class LCDUI():
         anchor="lt"
         menu_list=[]
         if self.state.radio_state.left_menu_activated.is_active or \
-           self.state.radio_state.selecting_a_menu.is_active:
+           self.state.radio_state.selecting_left_menu.is_active:
             anchor="lm"
             x=5
             menu_list=self.state.lm.menu_list 
             i=self.state.lm.menu_index
         elif self.state.radio_state.right_menu_activated.is_active or \
-             self.state.radio_state.selecting_a_menu.is_active:
+             self.state.radio_state.selecting_right_menu.is_active:
             anchor="rm"
             x=self.WIDTH
             menu_list=self.state.rm.menu_list 
@@ -562,6 +587,9 @@ class LCDUI():
        
 
     def draw_station_name(self, t:str, clear:bool=False):
+        '''
+        Draw station name (or PAD) 
+        '''
         if t is None or t=="":
             t=" "
 
@@ -618,22 +646,22 @@ class LCDUI():
 
 
     def draw_volume_bar(self, volume, max_volume=100, width=160, height=4, x=0, y=0, bar_margin=0):
-            """
-            Draws a horizontal volume bar at position (x, y).
-            """
-            bar_height = height // 2
-            bar_y      = y + (height - bar_height) // 2
+        '''
+        Draws a horizontal volume bar at position (x, y).
+        '''
+        bar_height = height // 2
+        bar_y      = y + (height - bar_height) // 2
 
-            # Bar background
-            self.draw.rectangle([
-                (x + bar_margin, bar_y), 
-                (x + width - bar_margin, bar_y + bar_height)], self.state.theme.volume_bg)
+        # Bar background
+        self.draw.rectangle([
+            (x + bar_margin, bar_y), 
+            (x + width - bar_margin, bar_y + bar_height)], self.state.theme.volume_bg)
 
-            # Bar fill - ensure volume is +ve
-            fill_width = int((width - 2 * bar_margin) * (abs(volume) / max_volume))
-            self.draw.rectangle([
-                (x + bar_margin, bar_y), 
-                (x + bar_margin + fill_width, bar_y + bar_height)], fill=self.state.theme.volume)
+        # Bar fill - ensure volume is +ve
+        fill_width = int((width - 2 * bar_margin) * (abs(volume) / max_volume))
+        self.draw.rectangle([
+            (x + bar_margin, bar_y), 
+            (x + bar_margin + fill_width, bar_y + bar_height)], fill=self.state.theme.volume)
 
 
     def scale_log(self, c, f):
@@ -786,43 +814,47 @@ class LCDUI():
     def waveform(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=4, is_mono:bool=False):
         '''
         Show waveform
-
-        TODO: VERY BROKEN - DO NOT USE ATM
         '''
-        return
-
         if signal is None:
             return
         if width==0:
             width=self.WIDTH
 
-        max_magnitude = np.max(signal)
-        if max_magnitude==0:
-            return
-        scale:float = float(height)/max_magnitude
-       
-        # Calc scale
-        bin_size = len(signal) // 30
-        step_width = width // 30
+        if is_mono:
+            mono_signal = signal
+        else:
+            mono_signal = (signal[0::2] + signal[1::2]) // 2
 
-        for x in range(0,30):
+        # Clear area
+        self.draw.rectangle([
+            (0, self.HEIGHT - height - base_y), 
+            (self.WIDTH, self.HEIGHT - base_y)], fill="black")
+
+        max_magnitude = np.max(mono_signal)
+        if max_magnitude==0.0:
+            max_magnitude=0.01
+        scale:float = float(height-2)/max_magnitude
+
+        #num_bins = len(mono_signal)
+        bin_size = len(mono_signal) // self.WIDTH
+        base_y = self.CENTRE_HEIGHT
+
+        for x in range(0,self.WIDTH,2):
             start = x * bin_size
             end = start + bin_size
-            if end > len(signal):
-                end = len(signal)
-            y1 = int(signal[start] * scale)
-            y2 = int(signal[end] * scale)
+            if end > len(mono_signal):
+                end = len(mono_signal)
+            v  = np.max(mono_signal[start:end])
 
-            # Draw line between peaks
-            self.draw.line( ( x, self.HEIGHT-base_y-y1, x+step_width , self.HEIGHT-base_y-y2), fill=self.state.theme.viz_line)
-            self.draw.point( (x, self.HEIGHT - y1 - base_y), fill=self.state.theme.viz_dot)
+            #bin_index = int((x / self.WIDTH) * num_bins)
+            #if bin_index >= num_bins:
+            #    bin_index = num_bins - 1
+            #h = (mono_signal[bin_index] * scale) // 2 
+            h = (v * scale) // 2 
+            self.draw.line( [
+                (x, self.HEIGHT - base_y - h) , 
+                (x, self.HEIGHT - base_y + h) ], fill=self.state.theme.viz_line, width=1)
+            self.draw.point( (x , self.HEIGHT - base_y - h), fill=self.state.theme.viz_dot)
+            self.draw.point( (x , self.HEIGHT - base_y + h), fill=self.state.theme.viz_dot)
 
-            '''
-            if y1 > self.last_max_signal[i]:
-                self.last_max_signal[i] = y1
-
-            if self.last_max_signal[i]>0:
-                self.draw.point(((i , self.HEIGHT - self.last_max_signal[i] - base_y)),fill=self.state.colours['viz_dot'])
-                self.last_max_signal[i] -= fall_decay
-            '''
 
