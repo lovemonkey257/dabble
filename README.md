@@ -219,7 +219,7 @@ cd shairport-sync
 autoreconf -fi
 ./configure --sysconfdir=/etc --with-pw --with-mqtt-client --with-soxr --with-avahi \
             --with-ssl=openssl --with-systemd --with-airplay-2 --with-metadata \
-            --with-dbus-interface --with-alsa --with-pw --with-pa`
+            --with-dbus-interface --with-dbus-test-client --with-alsa --with-pw --with-pa`
 make
 sudo make install
 sudo systemctl disable shairport-sync #disable the system level instance.
