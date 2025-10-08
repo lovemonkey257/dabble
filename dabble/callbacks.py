@@ -1,7 +1,9 @@
 
 import logging
-from threading import Lock
+import alsaaudio 
+from threading import Lock, current_thread
 from . import encoder, exceptions, menus, lcd_ui
+
 
 logger = logging.getLogger(__name__)
 
@@ -11,9 +13,19 @@ logger = logging.getLogger(__name__)
 # and strange station choices
 station_lock = Lock()
 
+# Ease debugging by changing threadname to the callback name
+def change_thread_name(func):
+    def wrapper(*args, **kwargs):
+        nn = func.__name__
+        current_thread().name = nn
+        result = func(*args, **kwargs)
+        return result
+    return wrapper
+
 #########################################################
 # CALLBACKS
 #########################################################
+@change_thread_name
 def exit_menu(encoder_position, ui, player, audio_processor):
     '''
     User has selected exit from menu...
@@ -30,7 +42,7 @@ def exit_menu(encoder_position, ui, player, audio_processor):
     elif ui.state.radio_state.right_menu_activated.is_active:
         ui.state.radio_state.right_menu_timeout()
 
-    elif ui.state.radio_state.selecting_a_menu.is_active:
+    elif ui.state.radio_state.selecting_left_menu.is_active:
         # Can only exit if menu being selected or menus active (but nothing selected yet)
         # exit_menu can be called multiple times if button debounce misses double press
         if encoder_position == encoder.EncoderPosition.LEFT:
@@ -39,7 +51,8 @@ def exit_menu(encoder_position, ui, player, audio_processor):
             ui.state.left_encoder.device.when_rotated_counter_clockwise  = lambda: change_station(ui,player,audio_processor)
             ui.state.radio_state.exit_left_menu()
 
-        elif encoder_position == encoder.EncoderPosition.RIGHT:
+    elif ui.state.radio_state.selecting_right_menu.is_active:
+        if encoder_position == encoder.EncoderPosition.RIGHT:
             logger.info("Exiting right menu")
             ui.state.right_encoder.device.when_rotated_clockwise         = lambda: ui.state.update("volume",audio_processor.vol_up(ui.state.volume_change_step))
             ui.state.right_encoder.device.when_rotated_counter_clockwise = lambda: ui.state.update("volume",audio_processor.vol_down(ui.state.volume_change_step))
@@ -47,16 +60,19 @@ def exit_menu(encoder_position, ui, player, audio_processor):
     else:
         logging.warning("Exit called. Wrong state: %s", ui.state.radio_state.current_state.id)
 
+@change_thread_name
 def next_menu(state, curr_menu):
     ''' Get next menu item, reseting timeout '''
     state.current_menu_item = curr_menu.get_next_menu()
     state.menu_timer.reset()
 
+@change_thread_name
 def prev_menu(state, curr_menu):
     ''' Get prev menu item, reseting timeout '''
     state.current_menu_item = curr_menu.get_prev_menu()
     state.menu_timer.reset()
 
+@change_thread_name
 def activate_or_run_menu(encoder_position, ui, player, audio_processor):
     '''
     Button pressed to bring up menu
@@ -95,10 +111,12 @@ def activate_or_run_menu(encoder_position, ui, player, audio_processor):
         ui.state.menu_timer = menus.PeriodicTask(interval=8, name="menu_timer", callback=lambda:exit_menu(encoder_position, ui, player, audio_processor))
         ui.state.menu_timer.run()
 
-    elif ui.state.radio_state.selecting_a_menu.is_active:
+    elif ui.state.radio_state.selecting_left_menu.is_active or \
+         ui.state.radio_state.selecting_right_menu.is_active:
         ui.state.menu_timer.reset()
         curr_menu.run_action(ui.state.current_menu_item)
 
+@change_thread_name
 def play_new_station(ui,player,audio_processor):
     '''
     New station selected, now play it
@@ -132,6 +150,7 @@ def play_new_station(ui,player,audio_processor):
     ui.state.last_pad_message = ""
     logger.info(f'Now playing {ui.state.station_name}')
 
+@change_thread_name
 def change_station(ui,player,audio_processor):
     '''
     User is moving dial to change station
@@ -170,6 +189,7 @@ def change_station(ui,player,audio_processor):
             logger.info(f'New station {station_number} {ui.state.station_name}/{ui.state.ensemble} selected')
             ui.reset_station_name_scroll()
 
+@change_thread_name
 def update_msg(msg, sub_msg:str=""):
     ''' 
     Callback to update the UI with a message from the player during scanning 
@@ -180,6 +200,7 @@ def update_msg(msg, sub_msg:str=""):
     ui.draw_ensemble(sub_msg)    
     ui.update()
 
+@change_thread_name
 def initiate_scan(ui,player,audio_processor):
     '''
     Initiate a scan
@@ -194,7 +215,7 @@ def initiate_scan(ui,player,audio_processor):
     exit_right_menu(ui,audio_processor)
     time.sleep(2)
 
-
+@change_thread_name
 def on_connect(client, userdata, flags, reason_code, properties):
     '''
     Run when connected to MQTT server
@@ -204,6 +225,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
     # reconnect then subscriptions will be renewed.
     client.subscribe("dabble-radio/#")
 
+@change_thread_name
 def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None):
     '''
     Callback on msg MQTT topic receive. Currently used to receive
@@ -226,21 +248,23 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
             case "client_name":
                 ui.state.client_name = payload
                 logger.info("Inbound Airplay connection from: %s", ui.state.client_name)
-            case "playing":
+            case "playing" | "play_resume":
                 logger.info("Airplay playing: %s", "yes" if payload else "no")
                 if ui.state.radio_state == menus.PlayerMode.AIRPLAY:
                     logger.info("Airplay already playing or being pausing. Ignore")
+                ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
             case "active_start":
                 logger.info("Airplay activated, Radio should shutdown")
                 ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
+                # Save the station name
                 ui.state.last_station_name = ui.state.station_name 
-                ui.state.station_name = "?"
                 player.stop()
             case "active_end":
                 logger.info("Airplay deactivated, Radio should start up again. Station: %s", ui.state.last_station_name)
                 ui.state.radio_state.mode = menus.PlayerMode.RADIO
                 ui.state.station_name = ui.state.last_station_name 
                 player.play(ui.state.station_name)
+                ui.state.ensemble = player.ensemble
             case "album":
                 logger.info("Airplay %s: %s", cmd, payload)
                 ui.state.album = payload
@@ -252,19 +276,41 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
                 logger.info("Airplay %s: %s", cmd, payload)
                 ui.state.artist = payload
                 ui.state.station_name = ui.state.artist
+            case "genre":
+                logger.info("Airplay %s: %s", cmd, payload)
+                ui.state.genre = payload
             case "volume":
-                logger.info("Volume %s", payload)
                 vol_db_str,_=payload.split(",",1) 
-                vol_db=abs(float(vol_db_str)) # Apple gives negative DB (real)
-                vol_mag = pow(10, vol_db/20.0)
-                logger.info("Will set to %d. Current volume: %d", vol_mag, ui.state.volume)
-                # TODO: Check
-                #ui.state.update("volume",vol_db)
+                vol_db = float(vol_db_str)  # Apple gives negative DB (real)
+                audio_processor.set_volume(vol_db, units=alsaaudio.VOLUME_UNITS_DB)
+                ui.state.update("volume",audio_processor.volume())
+                logger.info("Vol DB:%f. Current volume: %d", vol_db, ui.state.volume)
             case _:
                 logger.info("Unhandled MQTT Topic:%s - %s", msg.topic, payload)
     else:
         logger.info("Unexpected MQTT Topic:%s - %s", msg.topic, payload)
 
+
+@change_thread_name
+def change_mode(mode, mqtt_client, ui, player):
+    if mode == menus.PlayerMode.RADIO:
+        logger.info("Telling shairplay to stop playing")
+        ui.state.shairport_dbus_interface.Pause()
+        logger.info("Radio enabled. Station: %s", ui.state.last_station_name)
+        ui.state.radio_state.mode = menus.PlayerMode.RADIO
+        ui.state.station_name = ui.state.last_station_name 
+        player.play(ui.state.station_name)
+        ui.state.ensemble = player.ensemble
+
+    elif mode == menus.PlayerMode.AIRPLAY:
+        logger.info("Airplay activated, Radio should shutdown")
+        ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
+        # Save the station name
+        ui.state.last_station_name = ui.state.station_name 
+        player.stop()
+        ui.state.shairport_dbus_interface.Play()
+
+@change_thread_name
 def pad_update_handler(ui, updates):
     if updates.is_updated('no_signal'):
         ui.state.have_signal = False
