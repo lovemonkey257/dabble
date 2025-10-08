@@ -84,9 +84,6 @@ class AudioProcessing():
             self.mixer = alsaaudio.Mixer()
             logger.info("Using default mixer")
 
-        volcap = self.mixer.volumecap()
-        logger.info("Volume caps: %s", ",".join(volcap))
-
         self.stream:pyaudio.Stream = None
         # Callback updates this so need locking to protect it
         self._signal = np.zeros(4096)
@@ -98,13 +95,23 @@ class AudioProcessing():
 
         # Volume is the % value
         # We assume joined volume which is the natual way to change vol
+        volcap = self.mixer.volumecap()
+        logger.info("Volume caps: %s", ",".join(volcap))
+
+        db_min,db_max = self.mixer.getrange(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_DB)
+        self.db_min = db_min
+        self.db_max = db_min
+        logger.info("Mixer DB min: %d, max: %d", self.db_min, self.db_max)
+
         self.min_volume = 10
         self.max_volume = 90
         self.set_volume()
-        logger.info("Volume set to %d", self.volume())
+        logger.info(f'Mixer Volume set to {self.volume()}%')
 
-        self.audio_format   = pyaudio.paInt16 # pyaudio.paFloat32
-        self.audio_bit_size = np.int16        # np.float32
+        self.audio_format   = pyaudio.paInt32 #16 # pyaudio.paFloat32
+        self.audio_bit_size = np.int32 #16        # np.float32
+        logger.info(f'Audio Format Size: {self.audio_format}')
+        logger.info(f'Audio Bit Size:    {self.audio_bit_size}')
         self._max_value     = 2**16           # Unless its a float??
         self._lock = threading.Lock()
 
@@ -144,29 +151,31 @@ class AudioProcessing():
             self.set_volume(v)
         return v
    
-    def volume(self):
+    def volume(self, db:bool=False):
         '''
-        Return current ALSA playback volume
+        Return current ALSA playback volume as a % or as DB (-ve)
         '''
-        return self.mixer.getvolume(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_PERCENTAGE)[0]
+        return self.mixer.getvolume(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_DB)[0]/100 if db else self.mixer.getvolume(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_PERCENTAGE)[0]
 
-    def set_volume(self, vol:int=20):
+    def set_volume(self, vol:int=20, units:int=alsaaudio.VOLUME_UNITS_PERCENTAGE):
         '''
-        Set the ALSA volume for both stereo channels, using a percentage
+        Set the ALSA volume for both stereo channels, using a percentage, or use
+        alsaaudio.VOLUME_UNITS_DB to set as DB
         '''
         v=vol
-        # Make sure it's in range
-        if v<self.min_volume:
-            v=self.min_volume
-        elif v>self.max_volume:
-            v=self.max_volume
-        logger.debug(f'Setting volume to {v}%')
-        self.mixer.setvolume(v, 
-                units=alsaaudio.VOLUME_UNITS_PERCENTAGE, 
-                channel=alsaaudio.MIXER_CHANNEL_ALL)
+        if units==alsaaudio.VOLUME_UNITS_PERCENTAGE:
+            v=int(v)
+            if v<self.min_volume:
+                v=self.min_volume
+            elif v>self.max_volume:
+                v=self.max_volume
+        elif units==alsaaudio.VOLUME_UNITS_DB:
+            v=int(v*100)
 
-    def rms(self, signal):
-        return np.sqrt(np.abs(np.mean(np.square(signal))))
+        self.mixer.setvolume(v, 
+                units=units,
+                channel=alsaaudio.MIXER_CHANNEL_ALL)
+        logger.debug(f'Setting volume to {v} {self.volume(db=True)}db')
 
     def sound_data_avail_callback(self, in_data, frame_count, time_info, status):
         with self._lock:
