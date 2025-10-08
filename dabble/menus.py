@@ -45,6 +45,7 @@ class PeriodicTask:
         Call callback every interval seconds
         '''
         self._t = threading.Timer(self.interval, self.run_callback)
+        self._t.name = self.name
         self._t.start()
 
     def terminate(self):
@@ -71,18 +72,19 @@ class RadioMachine(StateMachine):
     selecting_a_station   = State()
     left_menu_activated   = State()
     right_menu_activated  = State()
-    selecting_a_menu      = State()
+    selecting_left_menu   = State()
+    selecting_right_menu  = State()
     scanning_for_stations = State()
 
     # Events
     activate_left_menu    = playing.to(left_menu_activated) 
-    left_menu_selection   = left_menu_activated.to(selecting_a_menu) 
-    exit_left_menu        = selecting_a_menu.to(playing)
+    left_menu_selection   = left_menu_activated.to(selecting_left_menu) 
+    exit_left_menu        = selecting_left_menu.to(playing)
     left_menu_timeout     = left_menu_activated.to(playing)
 
     activate_right_menu   = playing.to(right_menu_activated)
-    right_menu_selection  = right_menu_activated.to(selecting_a_menu) 
-    exit_right_menu       = selecting_a_menu.to(playing)
+    right_menu_selection  = right_menu_activated.to(selecting_right_menu) 
+    exit_right_menu       = selecting_right_menu.to(playing)
     right_menu_timeout    = right_menu_activated.to(playing)
 
     toggle_select_station = playing.to(selecting_a_station) | selecting_a_station.to(playing)
