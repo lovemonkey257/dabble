@@ -56,6 +56,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.info("Dabble Radio initialising")
 
+# Init LCD display and sensible theme defaults
 ui = None
 try:
     ui=lcd_ui.LCDUI()
@@ -87,8 +88,15 @@ except exceptions.NoRadioStations as e:
 logger.info("Loading saved state")
 current_config = state.load_state(ui.state)
 
-if theme := ui.state.theme.load_theme(ui.state.theme_name):
-    ui.state.theme = theme
+# Load theme and init fonts
+try:
+    if theme := ui.state.theme.load_theme(ui.state.theme_name):
+        ui.state.theme = theme
+        ui.init_fonts()
+except exceptions.FontException:
+    logging.fatal("Cannot load fonts")
+    shutdown(mqttc=mqttc)
+    sys.exit()
 
 # Display startup message
 ui.show_startup()
@@ -107,48 +115,6 @@ ui.state.right_encoder = encoder.Encoder(
         bounce_time=0.1,
         button_press_callback=lambda:callbacks.activate_or_run_menu(encoder.EncoderPosition.RIGHT, ui, player, audio_processor))
 
-# Set up menus and callbacks
-ui.state.lm = menus.Menu()
-ui.state.current_menu_item=""
-ui.state.lm.add_menu("Equaliser/Full", init_state="On" if ui.state.visualiser=="graphic_equaliser" else "off")\
-        .action(lambda: ui.state.update("visualiser","graphic_equaliser"))\
-        .change_state(lambda: "On" if ui.state.visualiser=="graphic_equaliser" else "Off")
-
-ui.state.lm.add_menu("Equaliser/Bars", init_state="On" if ui.state.visualiser=="graphic_equaliser_bars" else "off")\
-        .action(lambda: ui.state.update("visualiser","graphic_equaliser_bars"))\
-        .change_state(lambda: "On" if ui.state.visualiser=="graphic_equaliser_bars" else "Off")
-
-ui.state.lm.add_menu("Waveform", init_state="On" if ui.state.visualiser=="waveform" else "Off")\
-        .action(lambda: ui.state.update("visualiser","waveform"))\
-        .change_state(lambda: "On" if ui.state.visualiser=="waveform" else "Off")
-
-ui.state.lm.add_menu("Levels", init_state="On" if ui.state.levels_enabled else "Off")\
-        .action(lambda: ui.state.update("levels_enabled",not ui.state.levels_enabled))\
-        .change_state(lambda: "On" if ui.state.levels_enabled else "Off")
-
-ui.state.lm.add_menu("Visualiser", init_state="On" if ui.state.visualiser_enabled else "Off")\
-        .action(lambda: ui.state.update("visualiser_enabled",not ui.state.visualiser_enabled))\
-        .change_state(lambda: "On" if ui.state.visualiser_enabled else "Off")
-
-ui.state.lm.add_menu("Station Name", init_state="On" if ui.state.station_enabled else "Off")\
-        .action(lambda: ui.state.update("station_enabled",not ui.state.station_enabled))\
-        .change_state(lambda: "On" if ui.state.station_enabled else "Off")
-
-ui.state.lm.add_menu("Exit").action(lambda: callbacks.exit_menu(encoder.EncoderPosition.LEFT, ui, player, audio_processor))
-
-ui.state.rm = menus.Menu()
-ui.state.rm.add_menu("Radio Mode", init_state="On" if ui.state.radio_state.mode == menus.PlayerMode.RADIO  else "Off")\
-        .action(lambda: ui.state.radio_state.update("mode", menus.PlayerMode.RADIO))\
-        .change_state(lambda: "On" if ui.state.radio_state.mode == menus.PlayerMode.RADIO else "Off")
-
-ui.state.rm.add_menu("Airplay Mode", init_state="On" if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY  else "Off")\
-        .action(lambda: ui.state.radio_state.update("mode", menus.PlayerMode.AIRPLAY))\
-        .change_state(lambda: "On" if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY else "Off")
-
-ui.state.rm.add_menu("Scan Channels").action(lambda: callbacks.initiate_scan(ui, player, audio_processor))
-
-ui.state.rm.add_menu("Exit").action(lambda: callbacks.exit_menu(encoder.EncoderPosition.RIGHT, ui, player, audio_processor))
-
 logger.info("Setting colour of left encoder")
 ui.state.left_encoder.set_colour_by_rgb(ui.state.left_led_rgb)
 
@@ -158,15 +124,14 @@ ui.state.left_encoder.set_colour_by_rgb(ui.state.left_led_rgb)
 if ui.state.radio_state.mode == menus.PlayerMode.RADIO:
     logger.info(f'Begin playing {ui.state.station_name}')
     player.play(ui.state.station_name)
-    ui.state.last_station_name = player.playing
     ui.state.station_name      = player.playing
     ui.state.ensemble          = player.ensemble
-else:
+elif ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY:
     logger.info('Waiting for user to airplay music')
     ui.state.station_name      = "Waiting for stream.."
-    ui.state.last_station_name = ui.state.station_name
     ui.state.ensemble          = "..."
     ui.state.awaiting_signal   = False
+
 ui.update()
 
 logger.info("Audio processing initialising")
@@ -200,11 +165,52 @@ except ConnectionRefusedError as e:
 else:
     mqttc.loop_start()
 
-# Lets start the party....
-logger.info("Radio main loop starting")
+# Set up menus and callbacks
+ui.state.lm = menus.Menu()
+ui.state.current_menu_item=""
+ui.state.lm.add_menu("Equaliser/Full", init_state="On" if ui.state.visualiser=="graphic_equaliser" else "off")\
+        .action(lambda: ui.state.update("visualiser","graphic_equaliser"))\
+        .change_state(lambda: "On" if ui.state.visualiser=="graphic_equaliser" else "Off")
+
+ui.state.lm.add_menu("Equaliser/Bars", init_state="On" if ui.state.visualiser=="graphic_equaliser_bars" else "off")\
+        .action(lambda: ui.state.update("visualiser","graphic_equaliser_bars"))\
+        .change_state(lambda: "On" if ui.state.visualiser=="graphic_equaliser_bars" else "Off")
+
+ui.state.lm.add_menu("Waveform", init_state="On" if ui.state.visualiser=="waveform" else "Off")\
+        .action(lambda: ui.state.update("visualiser","waveform"))\
+        .change_state(lambda: "On" if ui.state.visualiser=="waveform" else "Off")
+
+ui.state.lm.add_menu("Levels", init_state="On" if ui.state.levels_enabled else "Off")\
+        .action(lambda: ui.state.update("levels_enabled",not ui.state.levels_enabled))\
+        .change_state(lambda: "On" if ui.state.levels_enabled else "Off")
+
+ui.state.lm.add_menu("Visualiser", init_state="On" if ui.state.visualiser_enabled else "Off")\
+        .action(lambda: ui.state.update("visualiser_enabled",not ui.state.visualiser_enabled))\
+        .change_state(lambda: "On" if ui.state.visualiser_enabled else "Off")
+
+ui.state.lm.add_menu("Station Name", init_state="On" if ui.state.station_enabled else "Off")\
+        .action(lambda: ui.state.update("station_enabled",not ui.state.station_enabled))\
+        .change_state(lambda: "On" if ui.state.station_enabled else "Off")
+
+ui.state.lm.add_menu("Exit").action(lambda: callbacks.exit_menu(encoder.EncoderPosition.LEFT, ui, player, audio_processor))
+
+ui.state.rm = menus.Menu()
+ui.state.rm.add_menu("Radio Mode", init_state="On" if ui.state.radio_state.mode == menus.PlayerMode.RADIO  else "Off")\
+        .action(lambda: callbacks.change_mode(menus.PlayerMode.RADIO, mqttc, ui, player))\
+        .change_state(lambda: "On" if ui.state.radio_state.mode == menus.PlayerMode.RADIO else "Off")
+ui.state.rm.add_menu("Airplay Mode", init_state="On" if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY  else "Off")\
+        .action(lambda: callbacks.change_mode(menus.PlayerMode.AIRPLAY, mqttc, ui, player))\
+        .change_state(lambda: "On" if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY else "Off")
+ui.state.rm.add_menu("Scan Channels").action(lambda: callbacks.initiate_scan(ui, player, audio_processor))
+ui.state.rm.add_menu("Exit").action(lambda: callbacks.exit_menu(encoder.EncoderPosition.RIGHT, ui, player, audio_processor))
+
+# Lets get this party started ...
+logger.info("Radio starting")
 ui.reset_station_name_scroll()
 
 try:
+    # Render loop
+    # TODO: Use callbacks perhaps? Will add complexity
     # Calc FPS and Render times
     fps=0
     fps_st=time.time()
