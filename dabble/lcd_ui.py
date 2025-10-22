@@ -332,7 +332,7 @@ class LCDUI():
                 case GraphicState.GRAPHIC_EQUALISER:
                     self.graphic_equaliser(self.state.audio_processor.signal(), base_y=28, height=35)
                 case GraphicState.GRAPHIC_EQUALISER_BARS:
-                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=28, height=35)
+                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=28, height=35, num_bars=32)
                 case GraphicState.WAVEFORM:
                     self.waveform(self.state.audio_processor.signal(), base_y=28, height=35)
             if with_lock:
@@ -419,7 +419,7 @@ class LCDUI():
                self.state.radio_state.selecting_left_menu.is_active or \
                self.state.radio_state.selecting_right_menu.is_active:
 
-                dimmed_image= Image.eval(self.img, lambda x: x/4)
+                dimmed_image= Image.eval(self.img, lambda x: x/5)
                 self.draw_menu(draw=ImageDraw.Draw(dimmed_image))
 
             # Update image on LCD
@@ -564,7 +564,7 @@ class LCDUI():
         menu_list=[]
         if self.state.radio_state.left_menu_activated.is_active or \
            self.state.radio_state.selecting_left_menu.is_active:
-            anchor="lm"
+            anchor="lm" # lm
             x=5
             menu_list=self.state.lm.menu_list 
             i=self.state.lm.menu_index
@@ -580,10 +580,10 @@ class LCDUI():
             prev_menu = menu_list[i-1].dstate() if i>0 else menu_list[-1].dstate()
             next_menu = menu_list[i+1].dstate() if i<len(menu_list)-1 else menu_list[0].dstate()
 
-            draw.line((0, 0, 0, self.HEIGHT), width=1, fill="darkgrey")
-            draw.text( (x, self.CENTRE_HEIGHT-cm_height), prev_menu, font=self.menu_sml_font, fill=self.state.theme.menu_sml, anchor='lm')
+            draw.line((0, 0, 0, self.HEIGHT), width=1, fill=self.state.theme.volume_bg)
+            draw.text( (x, self.CENTRE_HEIGHT-cm_height), prev_menu, font=self.menu_sml_font, fill=self.state.theme.menu_sml, anchor=anchor)
             draw.text( (x, self.CENTRE_HEIGHT), display_text, font=self.menu_sel_font, fill=self.state.theme.menu, anchor=anchor)
-            draw.text( (x, self.CENTRE_HEIGHT+cm_height), next_menu, font=self.menu_sml_font, fill=self.state.theme.menu_sml, anchor='lm')
+            draw.text( (x, self.CENTRE_HEIGHT+cm_height), next_menu, font=self.menu_sml_font, fill=self.state.theme.menu_sml, anchor=anchor)
        
 
     def draw_station_name(self, t:str, clear:bool=False):
@@ -611,6 +611,9 @@ class LCDUI():
 
 
     def scroll_status(self, speed=1, pause_for:int=900):
+        '''
+        Scroll the status line (ensemble/dab/album) if too big
+        '''
         if not self._pause_status_timer.expired():
             return
 
@@ -628,10 +631,14 @@ class LCDUI():
 
 
     def scroll_station_name(self, speed=2, pause_for:int=900):
+        '''
+        Scroll the station name and PAD
+        '''
         if not self._pause_station_timer.expired():
             return
 
         if self.station_name_x == (self.WIDTH-speed):
+        #if self.station_name_x%(self.WIDTH-speed) == 0:
             self._pause_station_timer.start(pause_for)
 
         self.station_name_x += int(speed)
