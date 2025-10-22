@@ -56,6 +56,9 @@ class AudioProcessing():
                 self.record_dev_name  = self.record_dev['name']
                 self.record_dev_index = self.record_dev['index']
             case DeviceSelection.PULSE:
+                if pulse_dev is None:
+                    logger.fatal("Cannot find pulse")
+                    raise Exception("Cannot find pulse audio")
                 self.record_dev_index = pulse_dev['index']
                 self.record_dev = self.p.get_device_info_by_index(self.record_dev_index)
                 self.record_dev_name = pulse_dev['name']
