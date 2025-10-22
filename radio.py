@@ -14,6 +14,7 @@ import threading
 from enum import Enum
 from pathlib import Path
 import paho.mqtt.client as mqtt
+from systemd.journal import JournalHandler
 
 from dabble import (audio_processing, encoder, exceptions, keyboard, lcd_ui,
                     radio_player, radio_stations, menus, state, callbacks)
@@ -54,6 +55,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger(__name__)
+journald_handler = JournalHandler()
+logger.addHandler(journald_handler)
+
 logger.info("Dabble Radio initialising")
 
 # Init LCD display and sensible theme defaults
@@ -95,7 +99,7 @@ try:
         ui.init_fonts()
 except exceptions.FontException:
     logging.fatal("Cannot load fonts")
-    shutdown(mqttc=mqttc)
+    shutdown(ui=ui)
     sys.exit()
 
 # Display startup message
@@ -135,7 +139,12 @@ elif ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY:
 ui.update()
 
 logger.info("Audio processing initialising")
-audio_processor = audio_processing.AudioProcessing() 
+try:
+    audio_processor = audio_processing.AudioProcessing() 
+except Exception as e:
+    shutdown(ui=ui, player=player)
+    sys.exit()
+
 ui.state.audio_processor = audio_processor
 
 # Set volume
@@ -215,6 +224,7 @@ try:
     fps=0
     fps_st=time.time()
     while True:
+        # TODO: Move FPS calc to draw_interface
         t1=time.time_ns()
         ui.draw_interface()
         t2=time.time_ns()
@@ -227,6 +237,7 @@ try:
             logging.debug("FPS: %d %dms", fps, render_time)
             fps=0
         fps+=1
+        time.sleep(0.005)
     # end while
 
 except (KeyboardInterrupt,SystemExit):
