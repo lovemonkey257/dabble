@@ -16,8 +16,7 @@ station_lock = Lock()
 # Ease debugging by changing threadname to the callback name
 def change_thread_name(func):
     def wrapper(*args, **kwargs):
-        nn = func.__name__
-        current_thread().name = nn
+        current_thread().name = func.__name__
         result = func(*args, **kwargs)
         return result
     return wrapper
@@ -63,14 +62,14 @@ def exit_menu(encoder_position, ui, player, audio_processor):
 @change_thread_name
 def next_menu(state, curr_menu):
     ''' Get next menu item, reseting timeout '''
-    state.current_menu_item = curr_menu.get_next_menu()
     state.menu_timer.reset()
+    state.current_menu_item = curr_menu.get_next_menu()
 
 @change_thread_name
 def prev_menu(state, curr_menu):
     ''' Get prev menu item, reseting timeout '''
-    state.current_menu_item = curr_menu.get_prev_menu()
     state.menu_timer.reset()
+    state.current_menu_item = curr_menu.get_prev_menu()
 
 @change_thread_name
 def activate_or_run_menu(encoder_position, ui, player, audio_processor):
@@ -127,7 +126,7 @@ def play_new_station(ui,player,audio_processor):
     # Back to playing
     ui.state.radio_state.toggle_select_station()
 
-    # TODO: If same station do nothing
+    # Don't select currently playing station
     if player.playing == ui.state.station_name:
         logger.info("User selected same station. Will ignore")
         return
