@@ -1,0 +1,27 @@
+[project]
+name = ""
+version = "0.0.1"
+dependencies = [
+    "adafruit-python-shell==1.9.1",
+    "dbus-python>=1.4.0",
+    "gpiodevice==0.0.5",
+    "gpiozero>=2.0.1",
+    "librosa==0.11.0",
+    "paho-mqtt==2.1.0",
+    "pillow==11.2.1",
+    "pimoroni-ioexpander==1.0.1",
+    "pip==23.0.1",
+    "pyalsaaudio==0.11.0",
+    "pyaudio>=0.2.14",
+    "python-statemachine==2.5.0",
+    "rpi-lgpio==0.6",
+    "setuptools==66.1.1",
+    "soundcard==0.4.4",
+    "st7735==1.0.0",
+    "systemd>=0.17.1",
+    "systemd-python>=235",
+    "toml==0.10.2",
+]
+
+[tool.uv]
+package = false
