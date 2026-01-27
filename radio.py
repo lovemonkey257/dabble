@@ -234,7 +234,7 @@ try:
             fps_st=time.time()
             ui.state.fps = fps
             ui.state.render_time = render_time
-            logging.debug("FPS: %d %dms", fps, render_time)
+            #logging.debug("FPS: %d %dms", fps, render_time)
             fps=0
         fps+=1
         time.sleep(0.005)
