@@ -279,17 +279,14 @@ mqtt = {
 TODO: How to run mqtt in rootless podman
 
 ## Dabble
-As this needs system installed packages create requirements as follows:
-
-`pip list --not-required --format=freeze -l > requirements.txt`
+Migrated to uv.
 
 To install:
 - `sudo apt install python3-dev python3-alsaaudio python3-pyaudio`
 - `git clone https://github.com/lovemonkey257/dabble.git`
 - `cd dabble`
-- Create venv `pip -mvenv venv`
-- Edit `./venv/pyvenv.cfg` and ensure `include-system-site-package` is `true`
-- `pip install -r requirements.txt`
+- `uv init`
+- `uv sync`
 
 ## Config
 Saved state is saved into `dabble_radio.json" e.g.
@@ -318,8 +315,7 @@ The zip installs under a dir called `static` which you should rename to `noto`.
 ## Running
 - cd into your dev dir
 - `./run-mqtt.sh`
-- `source ./venv/bin/activate`
-- `python radio.py`
+- `uv run radio.py`
 
 ### Left Encoder
 By default will select a station. Currently once a station is selected it will be used if left
