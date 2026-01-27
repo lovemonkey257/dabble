@@ -307,6 +307,7 @@ def change_mode(mode, mqtt_client, ui, player):
         # Save the station name
         ui.state.last_station_name = ui.state.station_name 
         player.stop()
+        ui.state.station_name = "Airplay active"
         ui.state.shairport_dbus_interface.Play()
 
 @change_thread_name
