@@ -68,7 +68,7 @@ class DablinLogParser():
         # Callback to handle updates
         self.pad_update_handler = None
 
-    def _get_line_from_q(self, recd_threshold:int=255):
+    def _get_line_from_q(self, recd_threshold:int=200):
             s=""
             recd=0
             # Q returns characters not lines!!
@@ -81,7 +81,16 @@ class DablinLogParser():
                 self._recv_errors+=1
                 logger.error("Log buffer overflowed. Probable reception errors")
                 logger.error("%s",s)
-            logger.debug("Line read from q: %s", s)
+            # TODO: Fix upstream in dablin?
+            # Dablin adds colour codes to errors (and no new line) when it has decode errors
+            # This usually means poor reception 
+            # We filter these out so as not to confuse the parser (which it does)
+            # However, dablin seems to get confused and things like PTY msgs etc seem to stop
+            # https://stackoverflow.com/questions/30425105/filter-special-chars-such-as-color-codes-from-shell-output
+            s = re.sub(u'\x1b\[.*?[@-~]', '', s)
+            s = re.sub(r'\(\d+\)', '', s)
+            # s = re.sub(r'\x1b(\[.*?[@-~]|\].*?(\x07|\x1b\\))', '', s)
+            logger.info("Dablin - Line read from q: %s", s)
             return s
     
     def _parse_dablin_output(self):
@@ -115,15 +124,17 @@ class DablinLogParser():
                 have_updates=False
                 with self._updates_lock:
                     k,v = self._parse_dablin_output()
-                    logger.debug("k:%s  v:%s", k, v)
                     if k is not None:
+                        logger.debug("k:%s  v:%s", k, v)
                         have_updates=True
                         self._updates.update(k,v)
 
                 # Callback?
                 if self.pad_update_handler is not None and have_updates:
                     self.pad_update_handler(self.updates())
-                time.sleep(0.1)
+
+                # Need this pause.
+                time.sleep(0.05)
 
         except KeyboardInterrupt as e:
             pass
@@ -145,7 +156,9 @@ class RadioPlayer():
         self.sid=""
         self.radio_stations = radio_stations
         self.multiplexes = list()
-        self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I')
+        # TODO: Parameterise gain (-g). Auto-gain does work but sometimes need to boost
+        #self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I -g 70')
+        self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -g 70')
         self.scan_cmdline=Template('/usr/local/bin/eti-cmdline-rtlsdr -J -x -C $block -D $scantime -Q')
         self._pad_update_handler = pad_update_handler
 
@@ -203,10 +216,13 @@ class RadioPlayer():
         PADChangeDynamicLabel SId 0xC4CD Label:'Radio X - Get Into the Music'
         PADChangeDynamicLabel SId 0xC4CD Label:'On Air Now on Radio X: Dan Gasser'        
         '''
+        # pad_label removed start_of_line anchor which may help when reception is challanging and eti_cmdline
+        # pumps out errors
+        # TODO: eti_cmdline.... errors confuse log parsing
         self.dablin_stderr_lookups = {
             "dab_type":  re.compile(f"^FICDecoder: SId {self.sid}: audio service \(SubChId\s+\d+, (?P<v>.*), primary\)", re.IGNORECASE),
             "prog_type": re.compile(f"^FICDecoder: SId {self.sid}: programme type \(static\): '(?P<v>.*)'", re.IGNORECASE),
-            "pad_label": re.compile(f"^PADChangeDynamicLabel SId {self.sid} Label:'(?P<v>.+)'", re.IGNORECASE),
+            "pad_label": re.compile(f"PADChangeDynamicLabel SId {self.sid} Label:'(?P<v>.+)'", re.IGNORECASE),
             "media_fmt": re.compile(f"^EnsemblePlayer: format: (?P<v>.*)", re.IGNORECASE),
             "no_signal": re.compile(f"^There does not seem to be a DAB signal here", re.IGNORECASE)
         }
@@ -230,6 +246,7 @@ class RadioPlayer():
             self.dablin_log_parser.stop()
         time.sleep(1)
 
+    """
     def _get_line_from_q(self, recd_threshold:int=200):
             s=""
             recd=0
@@ -260,6 +277,8 @@ class RadioPlayer():
         except Empty:
             pass
         return None
+
+    """
 
     def load_multiplexes(self):
         '''
