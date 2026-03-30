@@ -86,7 +86,7 @@ player=radio_player.RadioPlayer(
 try:
     stations.load_stations()
 except exceptions.NoRadioStations as e:
-    player.scan(ui_msg_callback=callbacks.update_msg)
+    player.scan(ui, ui_msg_callback=callbacks.update_msg)
 
 # Load defaults
 logger.info("Loading saved state")
