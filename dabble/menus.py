@@ -88,7 +88,7 @@ class RadioMachine(StateMachine):
     right_menu_timeout    = right_menu_activated.to(playing)
 
     toggle_select_station = playing.to(selecting_a_station) | selecting_a_station.to(playing)
-    toggle_scan           = right_menu_activated.to(scanning_for_stations) | scanning_for_stations.to(right_menu_activated) 
+    toggle_scan           = selecting_right_menu.to(scanning_for_stations) | scanning_for_stations.to(selecting_right_menu) 
 
     def on_transition(self, event_data, event: Event):
             assert event_data.event == event
