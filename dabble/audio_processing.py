@@ -6,8 +6,8 @@ Volume code: https://askubuntu.com/questions/689521/control-volume-using-python-
 
 import logging
 import alsaaudio
-import numpy as np
 import pyaudio
+import numpy as np
 import threading
 from copy import copy,deepcopy
 from enum import Enum,StrEnum
@@ -158,7 +158,10 @@ class AudioProcessing():
         '''
         Return current ALSA playback volume as a % or as DB (-ve)
         '''
-        return self.mixer.getvolume(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_DB)[0]/100 if db else self.mixer.getvolume(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_PERCENTAGE)[0]
+        return self.mixer.getvolume(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_DB)[0]/100 \
+                if db \
+                else \
+                self.mixer.getvolume(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_PERCENTAGE)[0]
 
     def set_volume(self, vol:int=20, units:int=alsaaudio.VOLUME_UNITS_PERCENTAGE):
         '''
