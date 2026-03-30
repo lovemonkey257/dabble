@@ -2,7 +2,7 @@
 	"default": {
 	    "base_font_path": "noto/NotoSans_SemiCondensed",
 	    "station_font_size" : 20,
-	    "station_font_style": "SemiBold",
+	    "station_font_style": "Light",
 	    "ensemble_font_size": 13,
 	    "ensemble_font_style": "Regular",
 	    "menu_font_size": 18,
@@ -16,6 +16,7 @@
 	    "volume": "#8ECAE6",
 	    "volume_bg": "#023047",
 	    "viz_line": "#126782",
+	    "viz_line": "#06242D",
 	    "viz_dot": "#8ECAE6"
 	},
 	"purple": {
