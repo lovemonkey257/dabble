@@ -90,7 +90,7 @@ class DablinLogParser():
             s = re.sub(u'\x1b\[.*?[@-~]', '', s)
             s = re.sub(r'\(\d+\)', '', s)
             # s = re.sub(r'\x1b(\[.*?[@-~]|\].*?(\x07|\x1b\\))', '', s)
-            logger.info("Dablin - Line read from q: %s", s)
+            logger.debug("Dablin - Line read from q: %s", s)
             return s
     
     def _parse_dablin_output(self):
@@ -292,10 +292,10 @@ class RadioPlayer():
                 self.multiplexes = s_json["uk"]
         return self.multiplexes
 
-    def scan(self, ui_msg_callback=None):
+    def scan(self, ui, ui_msg_callback=None):
 
         if ui_msg_callback is not None:
-            ui_msg_callback("Starting Scan")
+            ui_msg_callback(ui, "Starting Scan")
 
         # Cant scan while RTLSDR is in use
         self.stop()
@@ -307,7 +307,7 @@ class RadioPlayer():
         for block in sorted(self.multiplexes):
             print("Scanning", block)
             if ui_msg_callback is not None:
-                ui_msg_callback(f'Scanning {block}')
+                ui_msg_callback(ui, f'Scanning {block}')
 
             self.dablin_proc=subprocess.run(shlex.split(
                 self.scan_cmdline.substitute({
@@ -320,19 +320,19 @@ class RadioPlayer():
             if ensemble_file.exists():
                 with open(ensemble_file, 'r') as jfile:
                     data = json.load(jfile)
-                    ui_msg_callback("Done", sub_msg=f"{data['ensemble']} {len(data['stations'])} stations")
+                    ui_msg_callback(ui, "Done", sub_msg=f"{data['ensemble']} {len(data['stations'])} stations")
                     for s,sid in data['stations'].items():
                         if s not in stations:
                             stations[s]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }
                         else:
                             stations[s + " " + data['ensemble'] ]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }                  
             else:
-                ui_msg_callback(f'No stations')    
+                ui_msg_callback(ui, f'No stations')    
 
             time.sleep(1)
 
         if ui_msg_callback is not None:
-            ui_msg_callback(f'Storing Data')
+            ui_msg_callback(ui, f'Storing Data')
 
         with open("station-list.json","w") as s:
             json.dump(stations,s)
@@ -340,5 +340,5 @@ class RadioPlayer():
         self.radio_stations.load_stations()
 
         if ui_msg_callback is not None:
-            ui_msg_callback(f'Found {self.radio_stations.total_stations} stations')
+            ui_msg_callback(ui, f'Found {self.radio_stations.total_stations} stations')
     
