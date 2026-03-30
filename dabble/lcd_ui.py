@@ -403,9 +403,9 @@ class LCDUI():
 
             # Now levels
             if not self.state.levels_enabled:
-                self.clear_levels() # y=vol_bar_y + 6)
+                self.clear_levels(y=self.HEIGHT-1)
             else:
-                self.draw_levels(self.state.audio_processor.peak_l, self.state.audio_processor.peak_r) #, y=vol_bar_y + 6)
+                self.draw_levels(self.state.audio_processor.peak_l, self.state.audio_processor.peak_r, y=self.HEIGHT-1)
 
             if draw_centre_lines:
                 self.draw.line((self.CENTRE_WIDTH, 0, self.CENTRE_WIDTH, self.HEIGHT),  fill='gray')
@@ -461,26 +461,33 @@ class LCDUI():
         '''
         Clear the levels
         '''
-        self.draw.rectangle((0,y,self.WIDTH,y+3), (0, 0, 0))
+        self.draw.rectangle((0,y,self.WIDTH,y+1), (0, 0, 0))
 
     def draw_levels(self, l:int, r:int, y:int=1, decay:int=1, rainbow:bool=False):
         '''
         Draw levels
         '''
+        nl,nr=(0,0)
+        if l>0:
+            nl=int(l/100000)
+        if r>0:
+            nr=int(r/100000)
+
         c=self.WIDTH/2
-        y=self.HEIGHT-1
-        lx1=c-l-1
-        rx1=c+r+1
-        l_line_colour_rgb = self.state.theme.viz_line if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(l/10, 0.8, 0.9))
-        r_line_colour_rgb = self.state.theme.viz_line if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(r/10, 0.8, 0.9))
+        lx1=c-nl-1
+        rx1=c+nr+1
+        l_line_colour_rgb = self.state.theme.viz_dot if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(l/10, 0.8, 0.9))
+        r_line_colour_rgb = self.state.theme.viz_dot if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(r/10, 0.8, 0.9))
         self.clear_levels(y=y)
+        # Draw levels
         self.draw.line((c,y,lx1,y),fill=l_line_colour_rgb, width=1)
         self.draw.line((c,y,rx1,y),fill=r_line_colour_rgb, width=1)
-        self.draw.point((c,y),fill=self.state.theme.viz_dot)
-        if l>self.last_max_l_level:
-            self.last_max_l_level=l
-        if r>self.last_max_r_level:
-            self.last_max_r_level=r
+        # Draw centre point
+        self.draw.point((c,y),fill=self.state.theme.viz_line)
+        if nl>self.last_max_l_level:
+            self.last_max_l_level=nl
+        if nr>self.last_max_r_level:
+            self.last_max_r_level=nr
         if self.last_max_l_level>0:
             self.draw.point((c-self.last_max_l_level,y),fill=self.state.theme.viz_dot)
             self.last_max_l_level -= decay
@@ -675,7 +682,7 @@ class LCDUI():
         return c * math.log(float(1 + f),10);
 
 
-    def fft(self, signal, is_mono:bool=False, use_window:bool=False, use_db_scale:bool=False, low_pass_cutoff:float=12000.0):
+    def fft(self, signal, is_mono:bool=False, use_window:bool=False, use_db_scale:bool=False, low_pass_cutoff:float=0.0):
         '''
         Calc FFT of signal and process so we can visualise it.
         This is quick but processor intensive
@@ -688,7 +695,7 @@ class LCDUI():
         else:
             mono_signal = signal
 
-        # Use lowpass filter to enhance lower frequencies so viz as more energy
+        # Use lowpass filter to enhance lower frequencies so viz has more energy
         if low_pass_cutoff>0.0:
             nyq_freq = float(self.state.audio_processor.sample_rate)/2.0
             normalised_cutoff = low_pass_cutoff/nyq_freq
