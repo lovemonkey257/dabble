@@ -189,21 +189,23 @@ def change_station(ui,player,audio_processor):
             ui.reset_station_name_scroll()
 
 @change_thread_name
-def update_msg(msg, sub_msg:str=""):
+def update_msg(ui, msg, sub_msg:str=""):
     ''' 
     Callback to update the UI with a message from the player during scanning 
     '''
-    ui.clear_screen()
-    ui.reset_station_name_scroll()
+    # ui.clear_screen()
+    #ui.reset_station_name_scroll()
+    logger.info(f'Update UI with msg/submsg: {msg}/{sub_msg}')
     ui.draw_station_name(msg)  
     ui.draw_ensemble(sub_msg)    
     ui.update()
 
 @change_thread_name
-def initiate_scan(ui,player,audio_processor):
+def initiate_scan(ui, player, audio_processor):
     '''
     Initiate a scan
     '''
+    print(ui, player, audio_processor)
     ui.state.radio_state.toggle_scan()
     was_playing = player.playing
     # Scan will reload station list
@@ -211,7 +213,7 @@ def initiate_scan(ui,player,audio_processor):
     player.play(was_playing)
     # Wait for dabble/eti-cmdline to restart
     ui.state.radio_state.toggle_scan()
-    exit_right_menu(ui,audio_processor)
+    exit_menu(encoder.EncoderPosition.RIGHT, ui, player, audio_processor)
     time.sleep(2)
 
 @change_thread_name
