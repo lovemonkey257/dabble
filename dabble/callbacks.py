@@ -82,7 +82,13 @@ def activate_or_run_menu(encoder_position, ui, player, audio_processor):
     selected_encoder        = None
     change_encoder_function = False
 
-    if encoder_position == encoder.EncoderPosition.LEFT:
+    if ui.state.radio_state.standby.is_active:
+        # Move from standby to playing
+        ui.state.radio_state.activate_radio()
+        player.play(ui.state.station_name)
+        audio_processor.stream.start_stream()
+
+    elif encoder_position == encoder.EncoderPosition.LEFT:
         curr_menu = ui.state.lm
         selected_encoder = ui.state.left_encoder
         if ui.state.radio_state.playing.is_active:
@@ -159,7 +165,14 @@ def change_station(ui,player,audio_processor):
     TODO: Do we need to press encoder to select or auto select or
           is it configurable?
     '''
+    if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY:
+        # Disable change station when in airplay mode
+        return
+
     with station_lock:
+        # Get current position
+        left_encoder_value = ui.state.left_encoder.device.steps
+
         if ui.state.radio_state.playing.is_active or \
            not ui.state.radio_state.left_menu_activated.is_active and \
            not ui.state.radio_state.right_menu_activated.is_active and \
@@ -171,12 +184,13 @@ def change_station(ui,player,audio_processor):
             ui.state.station_timer = menus.PeriodicTask(interval=4, name="station_select_timer", callback=lambda:play_new_station(ui,player,audio_processor))
             ui.state.station_timer.run()
             logger.info("Start changing station..")
+            station_index  = player.radio_stations.station_index(player.playing)
+            logger.info("Left Encoder Steps: %d  Current Station Index: %d", left_encoder_value, station_index)
 
         if ui.state.radio_state.selecting_a_station.is_active:
             # still twiddling so reset timeout
             ui.state.station_timer.reset()
             # Get index of station in list and correct given current station
-            left_encoder_value = ui.state.left_encoder.device.steps
             station_index  = player.radio_stations.station_index(player.playing)
             station_number = left_encoder_value + station_index
             logger.info("Left Encoder Steps: %d  Current Station Index: %d, will choose %d", left_encoder_value, station_index, station_number)
@@ -231,6 +245,11 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
     '''
     Callback on msg MQTT topic receive. Currently used to receive
     comms from shairplay-sync (airplay)
+
+    Station Name == Artist
+    PAD          == Track Title
+    Status       == Album
+
     '''
     topic_components = msg.topic.split("/",2)
     if len(topic_components)<2:
@@ -251,7 +270,7 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
                 logger.info("Inbound Airplay connection from: %s", ui.state.client_name)
             case "playing" | "play_resume":
                 logger.info("Airplay playing: %s", "yes" if payload else "no")
-                if ui.state.radio_state == menus.PlayerMode.AIRPLAY:
+                if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY:
                     logger.info("Airplay already playing or being pausing. Ignore")
                 ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
             case "active_start":
@@ -259,12 +278,14 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
                 ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
                 # Save the station name
                 ui.state.last_station_name = ui.state.station_name 
-                player.stop()
+                if player:
+                    player.stop()
             case "active_end":
                 logger.info("Airplay deactivated, Radio should start up again. Station: %s", ui.state.last_station_name)
                 ui.state.radio_state.mode = menus.PlayerMode.RADIO
                 ui.state.station_name = ui.state.last_station_name 
-                player.play(ui.state.station_name)
+                if player:
+                    player.play(ui.state.station_name)
                 ui.state.ensemble = player.ensemble
             case "album":
                 logger.info("Airplay %s: %s", cmd, payload)
@@ -272,6 +293,7 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
             case "track" | "title":
                 logger.info("Airplay %s: %s", cmd, payload)
                 ui.state.track = payload
+                logger.info("Updating PAD to reflect %s name %s", cmd, ui.state.track)
                 ui.state.update_pad(ui.state.track)
             case "artist":
                 logger.info("Airplay %s: %s", cmd, payload)
@@ -308,7 +330,9 @@ def change_mode(mode, mqtt_client, ui, player):
         ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
         # Save the station name
         ui.state.last_station_name = ui.state.station_name 
-        player.stop()
+        if player:
+            player.stop()
+        ui.state.last_pad_message = ""
         ui.state.station_name = "Airplay active"
         ui.state.shairport_dbus_interface.Play()
 
@@ -339,3 +363,13 @@ def pad_update_handler(ui, updates):
         ui.state.awaiting_signal = False
         ui.state.genre = updates.get('prog_type').value
         logger.info(f"Genre: \"{ui.state.genre}\"")
+
+@change_thread_name
+def enter_standby(ui, player, audio_processor):
+    logger.info("Entering standby mode")
+    ui.state.radio_state.activate_standby()
+    # Pause streaming ...
+    audio_processor.stream.stop_stream()
+    # start playing state.current_station
+    player.stop()
+

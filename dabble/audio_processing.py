@@ -37,7 +37,7 @@ class AudioProcessing():
 
     def __init__(self, 
                  device_selection:DeviceSelection=DeviceSelection.PULSE, 
-                 frame_chunk_size:int=1024, 
+                 frame_chunk_size:int=2048, 
                  device_index:int=0):
 
         self.p=pyaudio.PyAudio()

@@ -125,6 +125,7 @@ ui.state.left_encoder.set_colour_by_rgb(ui.state.left_led_rgb)
 # TODO: What mode are we starting in???
 # This assumes mode is radio! Start up in airplay??
 
+ui.state.last_station_name = ""
 if ui.state.radio_state.mode == menus.PlayerMode.RADIO:
     logger.info(f'Begin playing {ui.state.station_name}')
     player.play(ui.state.station_name)
@@ -211,6 +212,7 @@ ui.state.rm.add_menu("Airplay Mode", init_state="On" if ui.state.radio_state.mod
         .action(lambda: callbacks.change_mode(menus.PlayerMode.AIRPLAY, mqttc, ui, player))\
         .change_state(lambda: "On" if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY else "Off")
 ui.state.rm.add_menu("Scan Channels").action(lambda: callbacks.initiate_scan(ui, player, audio_processor))
+ui.state.rm.add_menu("Standby").action(lambda: callbacks.enter_standby(ui, player, audio_processor))
 ui.state.rm.add_menu("Exit").action(lambda: callbacks.exit_menu(encoder.EncoderPosition.RIGHT, ui, player, audio_processor))
 
 # Lets get this party started ...

@@ -22,6 +22,8 @@ def load_state(state:lcd_ui.UIState):
             state.pulse_left_led_encoder = config['pulse_left_led_encoder']
             state.pulse_right_led_encoder = config['pulse_right_led_encoder']
             state.station_enabled = config['station_enabled'] if 'station_enabled' in config else True
+            state.volume_display_enabled = config['volume_display_enabled'] if 'volume_display_enabled' in config else True
+            state.mode_display_enabled = config['mode_display_enabled'] if 'mode_display_enabled' in config else True
             if "mode" in config:
                 if config['mode']=="radio":
                     state.radio_state.mode = menus.PlayerMode.RADIO
@@ -42,7 +44,7 @@ def save_state(state:lcd_ui.UIState):
         mode="airplay"
 
     config = {
-        "station_name": state.station_name if state.radio_state.mode == menus.PlayerMode.RADIO else state.last_station_name,
+        "station_name": state.station_name if state.radio_state.mode == menus.PlayerMode.RADIO else "",
         "ensemble": state.ensemble,
         "volume": state.volume,
         "pulse_left_led_encoder": state.pulse_left_led_encoder,
@@ -52,7 +54,9 @@ def save_state(state:lcd_ui.UIState):
         "enable_levels": state.levels_enabled,
         "station_enabled": state.station_enabled,
         "mode": mode,
-        "theme": state.theme.name
+        "theme": state.theme.name,
+        "mode_display_enabled": state.mode_display_enabled,
+        "volume_display_enabled": state.volume_display_enabled
     }
     with open(config_path, "w") as f:
         f.write(json.dumps(config))

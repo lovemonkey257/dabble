@@ -75,6 +75,7 @@ class RadioMachine(StateMachine):
     selecting_left_menu   = State()
     selecting_right_menu  = State()
     scanning_for_stations = State()
+    standby               = State()
 
     # Events
     activate_left_menu    = playing.to(left_menu_activated) 
@@ -89,6 +90,9 @@ class RadioMachine(StateMachine):
 
     toggle_select_station = playing.to(selecting_a_station) | selecting_a_station.to(playing)
     toggle_scan           = selecting_right_menu.to(scanning_for_stations) | scanning_for_stations.to(selecting_right_menu) 
+
+    activate_standby      = selecting_right_menu.to(standby)
+    activate_radio        = standby.to(playing)
 
     def on_transition(self, event_data, event: Event):
             assert event_data.event == event

@@ -9,6 +9,7 @@ import st7735
 import json
 import numpy as np
 import dbus
+from datetime import datetime
 
 from dataclasses import dataclass, field
 from enum import Enum,StrEnum
@@ -127,6 +128,8 @@ class UIState():
     visualiser:GraphicState        = GraphicState.GRAPHIC_EQUALISER
     levels_enabled:bool            = True
     station_enabled:bool           = True
+    mode_display_enabled:bool      = True
+    volume_display_enabled:bool    = True
 
     colors:dict                    = field(default_factory=dict)
     theme:UITheme                  = field(default_factory=UITheme)
@@ -281,11 +284,16 @@ class LCDUI():
         self.last_max_l_level = 0
         self.last_max_r_level = 0
         self.last_max_signal  = np.zeros(4096)
+        self.max_mag          = 1
     
         # This will also set a default theme just in case
         # any requested theme is broken/not there
         self.state = UIState()
 
+        # FPS calcs
+        self._fps  = 0     # Count for FPS
+        self._fps_st = time.time()   # Start of period
+        self._fps_et = 0   # End of period (1s)
 
     def get_font_path(self, style):
         fp=str(self.font_dir  / f'{self.base_font}-{style}.ttf')
@@ -314,6 +322,7 @@ class LCDUI():
             self.ensemble_font   = ImageFont.truetype(self.ensemble_font_file, self.state.theme.ensemble_font_size)
             self.menu_sel_font   = ImageFont.truetype(self.menu_font_file, self.state.theme.menu_font_size)
             self.menu_sml_font   = ImageFont.truetype(self.menu_font_file, self.state.theme.menu_font_sml_size)
+            self.clock_font      = ImageFont.truetype(self.station_font_file, 24)
         except OSError as e:
             logging.error("Cannot load font: %s", self.base_font)
             raise exceptions.FontException
@@ -330,11 +339,14 @@ class LCDUI():
                 self._lock.acquire()
             match self.state.visualiser:
                 case GraphicState.GRAPHIC_EQUALISER:
-                    self.graphic_equaliser(self.state.audio_processor.signal(), base_y=28, height=35)
+                    #self.graphic_equaliser(self.state.audio_processor.signal(), base_y=28, height=35)
+                    self.graphic_equaliser(self.state.audio_processor.signal(), base_y=26, height=37)
                 case GraphicState.GRAPHIC_EQUALISER_BARS:
-                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=28, height=35, num_bars=32)
+                    #self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=28, height=35, num_bars=32)
+                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=26, height=37, num_bars=32)
                 case GraphicState.WAVEFORM:
-                    self.waveform(self.state.audio_processor.signal(), base_y=28, height=35)
+                    #self.waveform(self.state.audio_processor.signal(), base_y=28, height=35)
+                    self.waveform(self.state.audio_processor.signal(), base_y=26, height=36)
             if with_lock:
                 self._lock.release()
 
@@ -349,14 +361,24 @@ class LCDUI():
 
         '''
         with self._lock:
+            t1=time.time_ns()
+
             # Normal display
+           
+            if self.state.radio_state.standby.is_active:
+                self.clear_screen()
+                self.draw_clock()
+                dimmed_image= Image.eval(self.img, lambda x: x/5)
+                self.update(img=dimmed_image)
+                return
 
             # If we have no vis OR no signals then make sure we clear the station name area or
             # we will get smudges as viz doesnt draw when no signal
             clear_sn = not self.state.visualiser_enabled or \
                        (self.state.audio_processor.peak_l==0 and self.state.audio_processor.peak_r==0)
 
-            vol_bar_y = self.HEIGHT - 27
+            #vol_bar_y = self.HEIGHT - 27
+            vol_bar_y = self.HEIGHT - 24
 
             if reset_scroll:
                 self.reset_station_name_scroll()
@@ -368,10 +390,11 @@ class LCDUI():
                 self.scroll_station_name()
 
             # When waiting for signal set PAD to nothing or status
-            if self.state.awaiting_signal:
-                self.state.last_pad_message = ""
-            elif not self.state.have_signal:
-                self.state.last_pad_message = "No Signal"
+            if self.state.radio_state.mode == menus.PlayerMode.RADIO:
+                if self.state.awaiting_signal:
+                    self.state.last_pad_message = ""
+                elif not self.state.have_signal:
+                    self.state.last_pad_message = "No Signal"
 
             # Draw the viz first, so we layer other text on top
             self.draw_viz()
@@ -383,8 +406,10 @@ class LCDUI():
                 self.draw_station_name(" ", clear=clear_sn)
 
             # Now volume and mode
-            self.draw_volume_bar(self.state.volume, x=0,y=vol_bar_y, height=4)   
-            self.draw_mode(clear=True)
+            if self.state.volume_display_enabled:
+                self.draw_volume_bar(self.state.volume, x=0,y=vol_bar_y, height=4)   
+            if self.state.mode_display_enabled:
+                self.draw_mode(clear=True)
 
             # Now Ensemble and DAB type (if in radio mode)
             if self.state.radio_state.mode == menus.PlayerMode.RADIO:
@@ -425,6 +450,17 @@ class LCDUI():
             # Update image on LCD
             self.update(img=dimmed_image)
 
+            # Calc FPS
+            t2=time.time_ns()
+            render_time = ((t2-t1)/1000000)
+            self._fps_et=time.time()
+            if self._fps_et - self._fps_st>=1:
+                self.state.fps = self._fps
+                self.state.render_time = render_time
+                self._fps_st=time.time()
+                self._fps=0
+            self._fps += 1 
+
 
     def update(self,img=None):
         '''
@@ -450,10 +486,21 @@ class LCDUI():
         self.draw.rectangle((0, 0, self.WIDTH, self.HEIGHT), (0, 0, 0))
 
 
+    def draw_clock(self):
+        '''
+        Draw clock in standby mode
+        '''
+        t = datetime.now().strftime("%H:%M:%S")
+        (x1,y1,x2,y2) = self.draw.textbbox( (self.CENTRE_WIDTH,self.CENTRE_HEIGHT), t,font=self.clock_font,anchor="lm")
+        text_width  = self.draw.textlength(t, font=self.clock_font)
+        text_x = text_width//2
+        self.draw.text( (text_x, self.CENTRE_HEIGHT), t, font=self.clock_font, fill=self.state.theme.station, anchor="lm")
+
+
     def show_startup(self):
         self.clear_screen()
         self.draw_station_name("Dabble Radio")
-        self.draw_ensemble("(c) digital-gangster 2025")
+        self.draw_ensemble("(c) digital-gangster 2026")
         self.update()
 
 
@@ -682,7 +729,7 @@ class LCDUI():
         return c * math.log(float(1 + f),10);
 
 
-    def fft(self, signal, is_mono:bool=False, use_window:bool=False, use_db_scale:bool=False, low_pass_cutoff:float=0.0):
+    def fft(self, signal, is_mono:bool=False, use_window:bool=False, low_pass_cutoff:float=0.0):
         '''
         Calc FFT of signal and process so we can visualise it.
         This is quick but processor intensive
@@ -690,10 +737,10 @@ class LCDUI():
         TODO: Move to audio_processing
         '''
         # Convert to mono
-        if not is_mono:
-            mono_signal = (signal[0::2] + signal[1::2]) / 2
-        else:
+        if is_mono:
             mono_signal = signal
+        else:
+            mono_signal = ((signal[0::2].astype(np.float32) + signal[1::2].astype(np.float32)) / 2).astype(np.int32)   
 
         # Use lowpass filter to enhance lower frequencies so viz has more energy
         if low_pass_cutoff>0.0:
@@ -702,24 +749,21 @@ class LCDUI():
             b, a  = butter(4, normalised_cutoff, btype='lowpass', analog=False)
             mono_signal = filtfilt(b, a, mono_signal)
 
-        # FFT magic
         # Window to reduce spectral oddities
         windowed_signal = mono_signal * np.hanning(len(mono_signal)) if use_window else mono_signal
-        fft_data        = np.fft.rfft(windowed_signal)
+
+        # FFT magic
+        fft_data        = np.abs(np.fft.rfft(windowed_signal))
 
         # FFT spectrum seems to be repeated so take what looks like
         # first "chunk" of repeated data
-        fft_spectrum = fft_data[0:256]
-
-        # Normalise fft, as values can be very large so we scale
-        fft_spectrum    = np.abs(fft_spectrum/1024)
-
-        if use_db_scale:
-            # While accurate, looks rubbish
-            fft_spectrum = 20 * np.log10(fft_spectrum + 1e-6)
+        fft_spectrum = fft_data[0:512]/10000
 
         # Max value
         max_magnitude = np.max(fft_spectrum)
+        if max_magnitude==0.0:
+            max_magnitude=0.01
+
         return (max_magnitude, fft_spectrum)
 
 
@@ -734,8 +778,6 @@ class LCDUI():
             width=self.WIDTH
 
         (max_magnitude, fft_spectrum) = self.fft(signal, is_mono=is_mono)
-        if max_magnitude==0.0:
-            max_magnitude=0.01
         scale:float = float(height)/max_magnitude
 
         # Clear existing graphics
@@ -747,7 +789,7 @@ class LCDUI():
         num_bins = len(fft_spectrum)
 
         # self.draw.line ( (0, self.HEIGHT - base_y - height, self.WIDTH , self.HEIGHT - base_y - height), fill=self.state.theme.viz_line)
-        for x in range(0,self.WIDTH,2):
+        for x in range(0,self.WIDTH,1):
             # Map x pixel to FFT bin index
             bin_index = int((x / self.WIDTH) * num_bins)
             if bin_index >= num_bins:
@@ -782,8 +824,6 @@ class LCDUI():
             width = self.WIDTH
 
         (max_magnitude, fft_spectrum) = self.fft(signal, is_mono=is_mono)
-        if max_magnitude == 0.0:
-            max_magnitude=0.01
         scale:float = float(height)/max_magnitude
 
         # Bin the FFT magnitudes into num_bars
@@ -794,11 +834,11 @@ class LCDUI():
         self.draw.rectangle([
             (0, self.HEIGHT - height - base_y), 
             (self.WIDTH, self.HEIGHT - base_y)], 
-                            fill="black")
+            fill="black")
 
         for x in range(0,num_bars):
             start = x * bin_size
-            end = start + bin_size
+            end   = start + bin_size
             if end > len(fft_spectrum):
                 end = len(fft_spectrum)
             # Aggregate magnitude within the bin
@@ -811,8 +851,7 @@ class LCDUI():
             # Draw the bar (rectangle)
             self.draw.rectangle([
                 (x1, self.HEIGHT - base_y - bar_height), 
-                (x2, self.HEIGHT - base_y)], 
-                                 fill=self.state.theme.viz_line, width=1)
+                (x2, self.HEIGHT - base_y)], fill=self.state.theme.viz_line, width=1)
 
             if bar_height > self.last_max_signal[x]:
                 self.last_max_signal[x] = bar_height
@@ -821,7 +860,7 @@ class LCDUI():
                 self.draw.line([
                     (x1, self.HEIGHT - base_y - self.last_max_signal[x]), 
                     (x2, self.HEIGHT - base_y - self.last_max_signal[x])], 
-                               fill=self.state.theme.viz_dot, width=1)
+                    fill=self.state.theme.viz_dot, width=1)
                 self.last_max_signal[x] -= fall_decay
 
 
@@ -837,33 +876,27 @@ class LCDUI():
         if is_mono:
             mono_signal = signal
         else:
-            mono_signal = (signal[0::2] + signal[1::2]) // 2
+            mono_signal = ((signal[0::2].astype(np.float32) + signal[1::2].astype(np.float32)) / 2).astype(np.int32)   
 
         # Clear area
         self.draw.rectangle([
             (0, self.HEIGHT - height - base_y), 
-            (self.WIDTH, self.HEIGHT - base_y)], fill="black")
+            (self.WIDTH, self.HEIGHT - base_y )], fill="black")
 
         max_magnitude = np.max(mono_signal)
-        if max_magnitude==0.0:
-            max_magnitude=0.01
+        if max_magnitude==0:
+            max_magnitude=0.001
         scale:float = float(height-2)/max_magnitude
 
-        #num_bins = len(mono_signal)
         bin_size = len(mono_signal) // self.WIDTH
         base_y = self.CENTRE_HEIGHT
 
-        for x in range(0,self.WIDTH,2):
+        for x in range(0,self.WIDTH,1):
             start = x * bin_size
             end = start + bin_size
             if end > len(mono_signal):
                 end = len(mono_signal)
             v  = np.max(mono_signal[start:end])
-
-            #bin_index = int((x / self.WIDTH) * num_bins)
-            #if bin_index >= num_bins:
-            #    bin_index = num_bins - 1
-            #h = (mono_signal[bin_index] * scale) // 2 
             h = (v * scale) // 2 
             self.draw.line( [
                 (x, self.HEIGHT - base_y - h) , 
