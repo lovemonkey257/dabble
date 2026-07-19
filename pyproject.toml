@@ -7,11 +7,13 @@ dependencies = [
     "dbus-python>=1.4.0",
     "gpiodevice==0.0.5",
     "gpiozero>=2.0.1",
+    "idna>=3.15.0",
     "librosa==0.11.0",
+    "msgpack>=1.2.1",
     "paho-mqtt==2.1.0",
     "pillow>=12.1.1",
     "pimoroni-ioexpander==1.0.1",
-    "pip>=26.0.1",
+    "pip>=26.1.2",
     "pyalsaaudio==0.11.0",
     "pyaudio>=0.2.14",
     "python-statemachine==2.5.0",
@@ -22,6 +24,7 @@ dependencies = [
     "systemd>=0.17.1",
     "systemd-python>=235",
     "toml==0.10.2",
+    "urllib3>=2.7.0",
 ]
 
 [tool.uv]
