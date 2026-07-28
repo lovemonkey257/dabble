@@ -295,6 +295,8 @@ class LCDUI():
         self._fps_st = time.time()   # Start of period
         self._fps_et = 0   # End of period (1s)
 
+        self._icount=0
+
     def get_font_path(self, style):
         fp=str(self.font_dir  / f'{self.base_font}-{style}.ttf')
         logging.info("Font path: %s", fp)
@@ -364,7 +366,6 @@ class LCDUI():
             t1=time.time_ns()
 
             # Normal display
-           
             if self.state.radio_state.standby.is_active:
                 self.clear_screen()
                 self.draw_clock()
@@ -466,15 +467,15 @@ class LCDUI():
         '''
         Update LCD. Use img or, or if none, the class image
         '''
-        if img is None:
-            self.disp.display(self.img)
-        else:
-            self.disp.display(img)
-
+        i = self.img if img is None else img
+        self.disp.display(i)
+        ## Save image
+        #i.save(f'capture-{self._icount}.png')
+        #self._icount+=1
 
     def _get_text_hw_and_bb(self, t:str, font=None):
         '''
-        Get boundingbox, text height and width give text str and font
+        Get boundingbox, text height and width given text str and font
         '''
         (x1,y1,x2,y2) = font.getbbox(t)
         text_height = abs(y2 - y1)
@@ -483,6 +484,9 @@ class LCDUI():
 
 
     def clear_screen(self):
+        '''
+        Clear the screen, assumes to black (0,0,0)
+        '''
         self.draw.rectangle((0, 0, self.WIDTH, self.HEIGHT), (0, 0, 0))
 
 
@@ -500,7 +504,7 @@ class LCDUI():
     def show_startup(self):
         self.clear_screen()
         self.draw_station_name("Dabble Radio")
-        self.draw_ensemble("(c) digital-gangster 2026")
+        self.draw_ensemble("(c) digital-gangsters 2026")
         self.update()
 
 
@@ -531,10 +535,12 @@ class LCDUI():
         self.draw.line((c,y,rx1,y),fill=r_line_colour_rgb, width=1)
         # Draw centre point
         self.draw.point((c,y),fill=self.state.theme.viz_line)
+        # Calc max
         if nl>self.last_max_l_level:
             self.last_max_l_level=nl
         if nr>self.last_max_r_level:
             self.last_max_r_level=nr
+        # Draw peaks with decay
         if self.last_max_l_level>0:
             self.draw.point((c-self.last_max_l_level,y),fill=self.state.theme.viz_dot)
             self.last_max_l_level -= decay
@@ -725,48 +731,6 @@ class LCDUI():
             (x + bar_margin + fill_width, bar_y + bar_height)], fill=self.state.theme.volume)
 
 
-    def scale_log(self, c, f):
-        return c * math.log(float(1 + f),10);
-
-
-    def fft(self, signal, is_mono:bool=False, use_window:bool=False, low_pass_cutoff:float=0.0):
-        '''
-        Calc FFT of signal and process so we can visualise it.
-        This is quick but processor intensive
-
-        TODO: Move to audio_processing
-        '''
-        # Convert to mono
-        if is_mono:
-            mono_signal = signal
-        else:
-            mono_signal = ((signal[0::2].astype(np.float32) + signal[1::2].astype(np.float32)) / 2).astype(np.int32)   
-
-        # Use lowpass filter to enhance lower frequencies so viz has more energy
-        if low_pass_cutoff>0.0:
-            nyq_freq = float(self.state.audio_processor.sample_rate)/2.0
-            normalised_cutoff = low_pass_cutoff/nyq_freq
-            b, a  = butter(4, normalised_cutoff, btype='lowpass', analog=False)
-            mono_signal = filtfilt(b, a, mono_signal)
-
-        # Window to reduce spectral oddities
-        windowed_signal = mono_signal * np.hanning(len(mono_signal)) if use_window else mono_signal
-
-        # FFT magic
-        fft_data        = np.abs(np.fft.rfft(windowed_signal))
-
-        # FFT spectrum seems to be repeated so take what looks like
-        # first "chunk" of repeated data
-        fft_spectrum = fft_data[0:512]/10000
-
-        # Max value
-        max_magnitude = np.max(fft_spectrum)
-        if max_magnitude==0.0:
-            max_magnitude=0.01
-
-        return (max_magnitude, fft_spectrum)
-
-
     def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=2, use_log_scale:bool=False, is_mono:bool=False):
         '''
         Show frequencies using fft
@@ -777,7 +741,7 @@ class LCDUI():
         if width==0:
             width=self.WIDTH
 
-        (max_magnitude, fft_spectrum) = self.fft(signal, is_mono=is_mono)
+        (max_magnitude, fft_spectrum) = self.state.audio_processor.fft(signal, is_mono=is_mono)
         scale:float = float(height)/max_magnitude
 
         # Clear existing graphics
@@ -823,7 +787,7 @@ class LCDUI():
         if width == 0:
             width = self.WIDTH
 
-        (max_magnitude, fft_spectrum) = self.fft(signal, is_mono=is_mono)
+        (max_magnitude, fft_spectrum) = self.state.audio_processor.fft(signal, is_mono=is_mono)
         scale:float = float(height)/max_magnitude
 
         # Bin the FFT magnitudes into num_bars
@@ -866,7 +830,7 @@ class LCDUI():
 
     def waveform(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=4, is_mono:bool=False):
         '''
-        Show waveform
+        Show waveform (no need for fft)
         '''
         if signal is None:
             return

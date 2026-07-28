@@ -238,3 +238,50 @@ class AudioProcessing():
         logger.debug("Peaks L:%0.3f R:%0.3f", peak_l, peak_r)
         return (peak_l, peak_r)
 
+
+    def fft(self, signal, is_mono:bool=False, use_window:bool=False, low_pass_cutoff:float=0.0):
+        '''
+        Calc FFT of signal using np.fft routines.
+        Windowing reduces spectral anomalies
+        Use low_pass_cutoff to enhance lower frequencies
+        '''
+        # Convert to mono
+        if is_mono:
+            mono_signal = signal
+        else:
+            mono_signal = ((signal[0::2].astype(np.float32) + signal[1::2].astype(np.float32)) / 2).astype(np.int32)   
+
+        # Use lowpass filter to enhance lower frequencies so viz has more energy
+        if low_pass_cutoff>0.0:
+            nyq_freq = float(self.state.audio_processor.sample_rate)/2.0
+            normalised_cutoff = low_pass_cutoff/nyq_freq
+            b, a  = butter(4, normalised_cutoff, btype='lowpass', analog=False)
+            mono_signal = filtfilt(b, a, mono_signal)
+
+        # Window to reduce spectral oddities
+        windowed_signal = mono_signal * np.hanning(len(mono_signal)) if use_window else mono_signal
+
+        # FFT magic
+        fft_data        = np.abs(np.fft.rfft(windowed_signal))
+
+        # FFT spectrum seems to be repeated so take what looks like
+        # first "chunk" of repeated data also scale down
+        # TODO: Really should work out why this happens. Documentation is unclear
+        #       how this would work. ? problem with USB audio ?
+        fft_spectrum = fft_data[0:512]/1000 #10000
+
+        # Use square root scaling to enhance freq plot otherwise simple
+        # linear scaling results in flat spectrum. Need more energy to be
+        # shown
+        # TODO: Should this be here or in the visualiser code?
+        fft_spectrum = np.sqrt(fft_spectrum)
+
+        # Max value
+        max_magnitude = np.max(fft_spectrum)
+        if max_magnitude==0.0:
+            # Avoid division by zero
+            max_magnitude=0.01
+
+        return (max_magnitude, fft_spectrum)
+
+
