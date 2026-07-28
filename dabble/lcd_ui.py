@@ -453,11 +453,13 @@ class LCDUI():
 
             # Calc FPS
             t2=time.time_ns()
-            render_time = ((t2-t1)/1000000)
+            render_time = ((t2-t1)/1000000000) # converted to seconds
             self._fps_et=time.time()
+            # Update per second
             if self._fps_et - self._fps_st>=1:
                 self.state.fps = self._fps
                 self.state.render_time = render_time
+                logger.debug("FPS: %s  Render Time: %s", self.state.fps, self.state.render_time)
                 self._fps_st=time.time()
                 self._fps=0
             self._fps += 1 
@@ -807,8 +809,10 @@ class LCDUI():
                 end = len(fft_spectrum)
             # Aggregate magnitude within the bin
             # For first bar (bass) use mean as it looks better
-            bar_value  = np.max(fft_spectrum[start:end]) if x>0 else np.mean(fft_spectrum[start:end])
+            bar_value  = np.max(fft_spectrum[start:end]) if x>0 else np.mean(fft_spectrum[start:end])*1.5
             bar_height = int(bar_value * scale)
+            if bar_height>height:
+                bar_height=height
             x1 = x * bar_width
             x2 = x1 + bar_width - 2
 

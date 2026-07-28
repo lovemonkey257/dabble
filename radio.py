@@ -221,29 +221,12 @@ ui.reset_station_name_scroll()
 
 try:
     # Render loop
-    # TODO: Use callbacks perhaps? Will add complexity
-    # Calc FPS and Render times
-    fps=0
-    fps_st=time.time()
     while True:
-        # TODO: Move FPS calc to draw_interface
-        t1=time.time_ns()
-
         # Stop animations when scanning...
         if not ui.state.radio_state.scanning_for_stations.is_active:
             ui.draw_interface()
-        t2=time.time_ns()
-        render_time = ((t2-t1)/1000000)
-        fps_et=time.time()
-        if fps_et-fps_st>=1:
-            fps_st=time.time()
-            ui.state.fps = fps
-            ui.state.render_time = render_time
-            #logging.debug("FPS: %d %dms", fps, render_time)
-            fps=0
-        fps+=1
-        time.sleep(0.005)
-    # end while
+        time.sleep(0.01)
+    # End While
 
 except (KeyboardInterrupt,SystemExit):
     audio_processor.stream.close()
