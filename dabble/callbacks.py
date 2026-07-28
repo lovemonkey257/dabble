@@ -1,6 +1,7 @@
 
 import logging
 import alsaaudio 
+import time
 from threading import Lock, current_thread
 from . import encoder, exceptions, menus, lcd_ui
 
@@ -207,8 +208,8 @@ def update_msg(ui, msg, sub_msg:str=""):
     ''' 
     Callback to update the UI with a message from the player during scanning 
     '''
-    # ui.clear_screen()
-    #ui.reset_station_name_scroll()
+    ui.clear_screen()
+    ui.reset_station_name_scroll()
     logger.info(f'Update UI with msg/submsg: {msg}/{sub_msg}')
     ui.draw_station_name(msg)  
     ui.draw_ensemble(sub_msg)    

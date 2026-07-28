@@ -242,9 +242,13 @@ class RadioPlayer():
     def stop(self):
         self.currently_playing = None
         if self.dablin_proc is not None:
-            self.dablin_proc.terminate()
+            # TODO: Fix this
+            try:
+                self.dablin_proc.terminate()
+            except:
+                pass
             self.dablin_log_parser.stop()
-        time.sleep(1)
+        time.sleep(2)
 
     """
     def _get_line_from_q(self, recd_threshold:int=200):
@@ -294,11 +298,11 @@ class RadioPlayer():
 
     def scan(self, ui, ui_msg_callback=None):
 
-        if ui_msg_callback is not None:
-            ui_msg_callback(ui, "Starting Scan")
-
         # Cant scan while RTLSDR is in use
         self.stop()
+
+        if ui_msg_callback is not None:
+            ui_msg_callback(ui, "Starting Scan")
 
         stations=dict()
 
@@ -320,7 +324,7 @@ class RadioPlayer():
             if ensemble_file.exists():
                 with open(ensemble_file, 'r') as jfile:
                     data = json.load(jfile)
-                    ui_msg_callback(ui, "Done", sub_msg=f"{data['ensemble']} {len(data['stations'])} stations")
+                    ui_msg_callback(ui, f"Found {len(data['stations'])} stations", sub_msg=data['ensemble'])
                     for s,sid in data['stations'].items():
                         if s not in stations:
                             stations[s]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }
@@ -329,10 +333,11 @@ class RadioPlayer():
             else:
                 ui_msg_callback(ui, f'No stations')    
 
-            time.sleep(1)
+            time.sleep(1.5)
 
         if ui_msg_callback is not None:
             ui_msg_callback(ui, f'Storing Data')
+            time.sleep(1.5)
 
         with open("station-list.json","w") as s:
             json.dump(stations,s)
@@ -341,4 +346,5 @@ class RadioPlayer():
 
         if ui_msg_callback is not None:
             ui_msg_callback(ui, f'Found {self.radio_stations.total_stations} stations')
+            time.sleep(1.5)
     
