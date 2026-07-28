@@ -228,7 +228,10 @@ try:
     while True:
         # TODO: Move FPS calc to draw_interface
         t1=time.time_ns()
-        ui.draw_interface()
+
+        # Stop animations when scanning...
+        if not ui.state.radio_state.scanning_for_stations.is_active:
+            ui.draw_interface()
         t2=time.time_ns()
         render_time = ((t2-t1)/1000000)
         fps_et=time.time()
