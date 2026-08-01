@@ -35,7 +35,26 @@
 	    "menu_sml": "#211154",
 	    "volume": "#E81AC6",
 	    "volume_bg": "#211154",
-	    "viz_line":"#9C178C",
+	    "viz_line":"#420B3B",
 	    "viz_dot":"#855CED"
+	},
+	"bluey": {
+	    "base_font_path": "noto/NotoSans_SemiCondensed",
+	    "station_font_size" : 20,
+	    "station_font_style": "Light",
+	    "ensemble_font_size": 13,
+	    "ensemble_font_style": "Regular",
+	    "menu_font_size": 18,
+	    "menu_font_sml_size": 15,
+	    "menu_font_style": "SemiBold",
+	    "mode_hilite": "#E81AC6",
+	    "station": "#33E1D8",
+	    "ensemble": "#333CE1",
+	    "menu": "#33E1D8",
+	    "menu_sml": "#0F3F66",
+	    "volume": "#33E1D8",
+	    "volume_bg": "#0F3F66",
+	    "viz_line":"#333CE1",
+	    "viz_dot":"#33E1D8"
 	}
 }
