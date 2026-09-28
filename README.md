@@ -36,6 +36,33 @@ See instructions below on getting it built.
 - `./run-mqtt.sh`
 - `uv run radio.py`
 
+The system will restart in whatever mode you left it in, but by default it will start
+in Radio mode.
+
+While in Radio mode if you airplay stream to this device it will automatically switch-over 
+and play whatever you stream. If you stop streaming, for example no music is selected, then 
+the device will automatically switch back to Radio.
+
+However, if you manually switch to Airplay mode the device will stay in that mode until you manually
+switch back to Radio mode.
+
+## Display
+The top line displays the mode, either Radio or Airplay.
+
+The middle contains four features:
+- Station Name alternating with the latest PAD message
+- Visualiser in the background
+- Volume bar below the visualiser
+
+The bottom line is the ensemble and DAB type (standard DAB or DAB+)
+
+While streaming the display adapts as follows:
+- Mode switches to Airplay
+- Station Name/PAD are replaced with Track and Artist
+- Ensemble and DAB type are replaced by Album Name
+
+Volume changes on your source device, say you phone, will be reflected by the radio player.
+
 ## Left Encoder
 By default will select a station. Currently once a station is selected it will be used if left
 for 4 seconds. This feels more intuitive than then having to press the button to select.
