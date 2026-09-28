@@ -1,92 +1,55 @@
 # Dabble Radio
+
+![alt text](docs/radio-interface-animation.gif)
+
 A DAB radio project based on a PI, RTLDSR, a small LCD and some LED encoders. The core software is based on the good work of dablin and eti-stuff and it is very much a work in progress.
 
 This project is targetted to be run on a Raspberry Pi running Raspberry Lite OS (this could change). Assumptions reqarding packages etc rely on this. While the hardware could be run on another system using I2C and I2S I've not tested this.  
 
-### Features
+## Features
 - DAB and DAB+ reception
 - Station name scroll
 - Ensemble displayed and DAB type
-- Airplay works, Album, Track and Artist are displayed
+- Stream via Apple Airplay. Displays Album, Track and Artist
 - Graphic equaliser works in both Radio and Airplay modes
-- Bar Graphic equaliser works in both Radio and Airplay modes
-- TODO: Update graphics below - they're a little dated.
-    
-![alt text](docs/playing.png)
-![alt text](docs/waveform.png)
-
-- PAD messages updated
-
-![alt text](docs/pad-msg.png)
-
-- Menus work
-- Volume works using linear and log scale (seems more natural). Need to add config to toggle this
-- Station selection works
+- Right encoder changes Volume (using log scale) 
+- Left encoder changes the station
 - Station scanning works, although need to decide how to handle default list of channels to scan
 - Also captures audio format and genre but not currently displayed
 - Can be themed but functionality not exposed yet
+- Power button to power radio off
   
-## Current progress and Features
-- It all works
-- DAB and DAB+ radio stations can be played
-- Scanning for stations works
-- Left encoder selects stations or used to change visualisations
-- Right encoder changes volume or used to scan or select mode
-- Can seamlessly move from Radio to Airplay and vice-versa
-- In airplay mode, displays album, track and artist
-- Volume works in both modes
-- Visualisations work in both modes
-- Some issues with menus for right encoder. Needs debugging
-- FFT works but need to double check it's doing what I think it is.
+## Current status and missing features
+- It works!!
+- Some interface issues when selecting stations
+- FFT works, but frequency selection needs some work 
+- No way to select country/default ensembles to scan
+- Themes are implemented but no way to select/update them
+- Need to run automatically at boot
+- Support for Google Cast audio streaming looks like it may not be possible as this relies
+  on propreitary protocols and private crypto. 
 
-## Components
-- Raspberry Pi 5. I tried the Pi Zero 2 but it doesn't have enough processing power if visualisations are used.
-- Gave up on the Adafruit Speaker Bonnet and now using a USB sound card which is much more reliable
-- [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
-- 2 x [Fermion EC11 encoders](https://thepihut.com/products/fermion-ec11-rotary-encoder-module-breakout). These work well and I'm using these instead of the pretty one.
-- NESDR Nano 2+ (but any RTLSDR should do)
-- Tecknet USB sound card. Cheap, functional and sounds "good enough". This isn't a audiophile project.
-- No idea about an enclosure yet. Will prototype it in thin MDF
+# Running
+See instructions below on getting it built.
 
-## Software
-- UI and controller written in python
-- Modified version of of eti-cmdline from JvanKatwijk to enable scans. Forked here https://github.com/lovemonkey257/eti-stuff
-- Modified version of dablin from Opendigialradio so I can get PAD messages in cli version, https://github.com/lovemonkey257/dablin
-- Shairplay-sync, built from souce. Will try to move back to podman
-- Have to use pulse so audiocard can be shared
+- cd into your dev dir
+- `./run-mqtt.sh`
+- `uv run radio.py`
 
-## Deprecated - Capture Audio from Adafruit Speaker Bonnet
-The driver for the speaker bonnet does not present a recording interface - its playback only. This
-is a problem for me as I sample the sound to display the visualiser.
+## Left Encoder
+By default will select a station. Currently once a station is selected it will be used if left
+for 4 seconds. This feels more intuitive than then having to press the button to select.
 
-Using ALSA and any advice on capturing sound didn't work for me. Even AI gave up so I did it the
-old fashioned way and figured-it-out-myself. It took a while...
+Press the button to bring up the menu which allows you to change a number of dispay settings
+such as Equaliser type, Station on/off, Levels on/off.
 
-I've created a script `init-sound-system.sh` to do this but it uses ALSA loopback and some 
-pulseaudio magic (which apparantly is how the Linux Sound sub-systems work).
+## Right Encoder
+By default will change the volume. This is based on a log scale which feels better than
+linear.
 
-This is what I had to do and it works:
+Press the button to bring up the menu to allowing you to change the mode or initiate a scan. 
 
-- Load the ALSA loop back driver `sudo modprobe snd-aloop pcm_substreams=1`
-- Define the source (from `pactl list sources short`) `SRC=alsa_output.platform-soc_107c000000_sound.stereo-fallback.monitor`
-- Define the sink i.e. loopback `SINK=alsa_output.platform-snd_aloop.0.analog-stereo`
-- Link them together `pactl load-module module-loopback source=$SRC sink=$SINK`
-
-Anything played through the Bonnet is now fed back into the loopback sink which you can then capture
-sound from. I found that the SDL sub-system picked this up automatically and I didn't need to set
-`AUDIODEV`.
-
-Eventually I gave up on the Bonnet and switched to a USB sound card. I'll use external speakers
-as there were too many problems with the Bonnet, not limited to volume control (when used with 
-pipewire) and the above issue, which I solved but added complexity. YMMV.
-
-## Current problems:
-- Proper build perhaps into containers
-- Enclosure
-
-## Possibly menu system
-Two encoders (left, right) both with built in buttons. We have four entry techniques: twist to search, button to select.
-
+## Menus in detail
 ### Left Encoder
 Default - Volume
 On click:
@@ -99,28 +62,48 @@ On click:
     - Station name On/Off
 
 - Select and click (if off will enable it)
-- If nothing selected revert to play screen after a few seconds
+- If nothing selected revert to play screen after five seconds
 
 ### Right Encoder
-Default - Station select. No button needed to select?
+Default - Station select. No button needed to select. Leave on a station for 3 seconds and
+          it will be selected automatically
 On click:
 - Menu options displayed:
+    - Radio Mode
+    - Airplay Mode
     - Scan
-    - Themes? 
-    - Country/Language?? Selects ensemble channels
-    - Possibly more
+    - Standby Mode
 - If nothing selected for more than 5 secs revert to play screen
 
 # Build
+
+## Components
+- Raspberry Pi 5. I tried the Pi Zero 2 but it doesn't have enough processing power if visualisations are used.
+- [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
+- 2 x [Fermion EC11 encoders](https://thepihut.com/products/fermion-ec11-rotary-encoder-module-breakout). These work well and I'm using these instead of the pretty one.
+- NESDR Nano 2+ (but any RTLSDR should do)
+- Tecknet USB sound card. Cheap, functional and sounds "good enough". This isn't a audiophile project.
+- Gave up on the Adafruit Speaker Bonnet and now using a USB sound card which is much more reliable. The drivers etc have been updated so may go back to this.
+- No idea about an enclosure yet. I'm rubbish at this....
+
+## Base OS
 Install Raspberry Pi Lite, no GUI needed, minimal install.
 
-Building custom `dablin` and `eti-cmdline` needs thought as the build dependencies
+## Software
+- UI and controller written in python
+- Modified version of of eti-cmdline from JvanKatwijk to enable scans. Forked here https://github.com/lovemonkey257/eti-stuff. Now accepted upstream so you can use eti-cmdline directly
+- Modified version of dablin from Opendigialradio so I can get PAD messages in cli version, https://github.com/lovemonkey257/dablin. PR accepted but not yet merged.
+- Shairplay-sync, built from souce. Will try to move back to podman
+- Have to use pulse so audiocard can be shared
+
+## Software Builds
+Building custom `dablin` needs thought as the build dependencies
 add unnecessary bloat. 
 
-## Base config
+### Base config
 Ensure Raspberry Pi has SPI and I2C enabled in config. i2s-mmap makes sound
-more efficient. Also turn off internal Audio (snd_bcm2935) so bonnet is primary 
-output.
+more efficient. Also turn off internal Audio (snd_bcm2935) so bonnet, if being
+used, is primary output. USB works by default.
 
 `/boot/firmware/config.txt` 
 
@@ -140,16 +123,16 @@ sudo raspi-config nonint do_spi 1
 sudo raspi-config nonint do_i2c 1
 ```
 
-* If using lite so no GUI etc ensure pipewire-pulse installed:*
+* If using lite no GUI is installed so ensure pipewire-pulse installed:*
 ```
 sudo apt install -y pipewire-pulse pulseaudio-utils
 sudo reboot
 ```
 
-## Build Essentials
+### Build Essentials
 `sudo apt install build-essential cmake`
 
-## `dablin`
+### `dablin`
 Dependencies first.
 - `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libfdk-aac-dev`
 
@@ -167,12 +150,14 @@ problems with PAD.
 Also avoid `make install` as that will try to build GTK version. We only want the cli version
 so we mv it manually.
 
-## `eti-cmdline`
+### `eti-cmdline`
+This can be installed from Jvan's repo directly. The build is the same.
+
 Dependencies:
 - `sudo apt install libfftw3-dev libsndfile1-dev libsamplerate0-dev librtlsdr-dev libboost-dev jq`
 
 Code. Most changes have been accepted upstream (thanks Jvan) so this is probably redundent:
-- `git clone https://github.com/lovemonkey257/eti-stuff.git`
+- `git clone https://github.com/lovemonkey257/eti-stuff.git` or `git clone https://github.com/JvanKatwijk/eti-stuff.git`
 - `cd eti-stuff\eti-cmdline`
 - `mkdir build && cd build`
 - `cmake .. -DRTLSDR=ON`
@@ -180,19 +165,19 @@ Code. Most changes have been accepted upstream (thanks Jvan) so this is probably
 
 This should put `eti-cmdline-rtlsdr` into `/usr/local/bin`
 
-## Test Radio by Scanning
+### Test Radio by Scanning
 
 - Ensure RTL device and audio are set up.
-- Test eti-cmdline can see USB RTL and dump some station params: `eti-cmdline-rtlsdr -J -x`
-- Acid test. Play a station `dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c 11D -s 0xc0c6 -I`
+- Test `eti-cmdline` can see USB RTL and dump some station params: `eti-cmdline-rtlsdr -J -x`
+- Acid test, station selection and audio: `dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c 11D -s 0xc0c6 -I`
 
 Note the channel (11D) and station (0xc0c6) are the params for Magic Radio in the UK. Depending
 on your location you will need to tweak these. I'm trying to find sources based on country but
 that is for later on, sorry.
 
-## Shairplay-sync
-These instructions are based on those detailed in https://github.com/mikebrady/shairport-sync/issues/1970 (thanks to
-those who figured it out).
+### Shairplay-sync
+These instructions are based on those detailed in https://github.com/mikebrady/shairport-sync/issues/1970
+(thanks to those who figured it out).
 
 - Build dependencies
 
@@ -275,12 +260,48 @@ mqtt = {
 - Enable avahi-daemon `sudo systemctl enable avahi-daemon && sudo systemctl start avahi-daemon` 
 - Enable shairport-sync `systemctl --user enable shairport-sync.service && systemctl --user start shairport-sync.service`
 
-## MQTT
-TODO: How to run mqtt in rootless podman
+### MQTT
+Need to run `run-mqtt.sh`
 
-## Dabble
-Migrated to uv.
+```
+#! /bin/bash
+echo "Creating storage folders"
+mkdir -p $HOME/mqtt/data
+mkdir -p $HOME/mqtt/log
+mkdir -p $HOME/mqtt/config
+mkdir -p $HOME/mqtt/config/conf.d
 
+podman stop mqtt 
+podman rm mqtt
+podman pull docker.io/eclipse-mosquitto:latest
+
+CONFIG=$HOME/mqtt/config/mosquitto.conf
+if [ ! -r $CONFIG ]; then
+        echo "Creating MQTT config: $CONFIG"
+        cat <<- 'EOF' > $CONFIG
+                allow_anonymous true
+                listener 1883 0.0.0.0
+                persistence true
+                persistence_location /mosquitto/data/
+                log_dest file /mosquitto/log/mosquitto.log
+                log_dest stdout
+                include_dir /mosquitto/config/conf.d
+EOF
+else
+        echo "Config found"
+fi
+
+podman run -d --name mqtt \
+        --label "io.containers.autoupdate=image" \
+        --restart=always \
+        -p 1883:1883 -p 9001:9001 \
+        -v $HOME/mqtt/config:/mosquitto/config:ro \
+        -v $HOME/mqtt/data:/mosquitto/data \
+        -v $HOME/mqtt/log:/mosquitto/log \
+        docker.io/eclipse-mosquitto:latest
+```
+
+### Dabble
 To install:
 - `sudo apt install python3-dev python3-alsaaudio python3-pyaudio`
 - `git clone https://github.com/lovemonkey257/dabble.git`
@@ -288,7 +309,9 @@ To install:
 - `uv init`
 - `uv sync`
 
-## Config
+### Config
+This is created with a default settings on first run.
+
 Saved state is saved into `dabble_radio.json" e.g.
 
 ```  
@@ -312,24 +335,27 @@ Install font from https://fonts.google.com/share?selection.family=Noto+Sans:ital
 
 The zip installs under a dir called `static` which you should rename to `noto`.
 
-## Running
-- cd into your dev dir
-- `./run-mqtt.sh`
-- `uv run radio.py`
 
-### Left Encoder
-By default will select a station. Currently once a station is selected it will be used if left
-for 4 seconds. This feels more intuitive than then having to press the button to select.
+## Deprecated - Capture Audio from Adafruit Speaker Bonnet
+The driver for the speaker bonnet does not present a recording interface - its playback only so no
+way to sample the audio for the visualiser.
 
-Press the button to bring up the menu which allows you to change a number of dispay settings
-such as Equaliser type, Station on/off, Levels on/off.
+Using ALSA and the advice on capturing sound didn't work for me. Even AI gave up so I did it the
+old fashioned way and figured-it-out-myself. It took a while...
 
-### Right Encoder
-By default will change the volume. This is based on a log scale which feels better than
-linear.
+I've created a script `init-sound-system.sh` to do this but it uses ALSA loopback and some 
+pulseaudio magic, which apparantly powers the Linux Sound sub-systems.
 
-Press the button to bring up the menu to allow you to initiate a scan. It doesn't do much
-else at the moment.
+The magic incantation is as follows:
 
+- Load the ALSA loop back driver `sudo modprobe snd-aloop pcm_substreams=1`
+- Define the source (from `pactl list sources short`) `SRC=alsa_output.platform-soc_107c000000_sound.stereo-fallback.monitor`
+- Define the sink i.e. loopback `SINK=alsa_output.platform-snd_aloop.0.analog-stereo`
+- Link them together `pactl load-module module-loopback source=$SRC sink=$SINK`
 
+Anything played through the Bonnet is now fed back into the loopback sink which you can then capture
+sound from. I found that the SDL sub-system picked this up automatically and I didn't need to set
+`AUDIODEV`.
+
+Eventually I gave up on the Bonnet and switched to a USB sound card as I could not control the volume.
 
