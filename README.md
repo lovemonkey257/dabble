@@ -113,6 +113,21 @@ On click:
 - Gave up on the Adafruit Speaker Bonnet and now using a USB sound card which is much more reliable. The drivers etc have been updated so may go back to this.
 - No idea about an enclosure yet. I'm rubbish at this....
 
+## Hardware Build
+
+### Encoder wiring
+TBD
+
+### LCD wiring
+TBD
+
+### Power button
+TBD
+
+### GPIO pin layout
+[GPIO PIN layout](docs/pin_usage.md)
+
+
 ## Base OS
 Install Raspberry Pi Lite, no GUI needed, minimal install.
 
