@@ -111,22 +111,15 @@ On click:
 - NESDR Nano 2+ (but any RTLSDR should do)
 - Tecknet USB sound card. Cheap, functional and sounds "good enough". This isn't a audiophile project.
 - Gave up on the Adafruit Speaker Bonnet and now using a USB sound card which is much more reliable. The drivers etc have been updated so may go back to this.
+- Aerial, 1m, 7 section with BNC connector
+- BNC Female to MCX Male Lowloss Pigtail, 24cm
 - No idea about an enclosure yet. I'm rubbish at this....
 
 ## Hardware Build
-
-### Encoder wiring
 TBD
 
-### LCD wiring
-TBD
-
-### Power button
-TBD
-
-### GPIO pin layout
-[GPIO PIN layout](docs/pin_usage.md)
-
+### Wiring for each device
+See [GPIO PIN layout](docs/pin_usage.md)
 
 ## Base OS
 Install Raspberry Pi Lite, no GUI needed, minimal install.
