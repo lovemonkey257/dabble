@@ -27,7 +27,7 @@ This project is targetted to be run on a Raspberry Pi running Raspberry Lite OS 
 - Themes are implemented but no way to select/update them
 - Need to run automatically at boot
 - Support for Google Cast audio streaming looks like it may not be possible as this relies
-  on propreitary protocols and private crypto. 
+  on proprietary protocols and private crypto. Maybe use: https://github.com/rgerganov/shanocast
 
 # Running
 See instructions below on getting it built.
