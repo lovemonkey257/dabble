@@ -46,6 +46,7 @@
 
 ## Power Button
 | Desc | BCM | PIN | Pin Column |
+| - | - | - | - |
 | LED VCC | x | x | x |
 | LED Gnd | x | x | x |
 | Boot    | GPIO16 | 36 | 18 |
