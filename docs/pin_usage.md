@@ -45,13 +45,17 @@
 | PCM DOUT | GPIO21 | 40 | 20 |
 
 ## Power Button
-
 Ref: https://gist.github.com/lbussy/9e81cbcc617952f1250e353bd42e7775
+```
+# Power button
+dtoverlay=gpio-shutdown,debounce=500   
+dtoverlay=gpio-led,gpio=3,label=pwrled,trigger=default-on,active_low=0
+```
 
 | Desc | BCM | PIN | Pin Column |
 | - | - | - | - |
-| LED VCC | x | x | x |
-| LED Gnd | x | x | x |
+| LED VCC | GPIO3 | 5 | 3 |
+| LED Gnd | GND | 9 | 5 |
 | Boot    | GPIO16 | 36 | 18 |
 | Boot Gnd | GND | 34 | 17 |
 
