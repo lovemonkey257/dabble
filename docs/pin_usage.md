@@ -10,7 +10,7 @@
 | SCK  | GPIO11/SCLK | 23  | 12 |
 | MOSI | GPIO10/MOSI   | 19  | 10 |
 | DC   | GPIO9/MISO    | 21  | 11 |
-| BL   | GPIO16  | 36  | 18 |
+| BL   | GPIO26  | 37  | 19 |
 
 ## Left Encoder
 
@@ -43,6 +43,13 @@
 | PWM CLK  | GPIO18 | 12 | 6 |
 | PCM FS   | GPIO19 | 35 | 18 |
 | PCM DOUT | GPIO21 | 40 | 20 |
+
+## Power Button
+| Desc | BCM | PIN | Pin Column |
+| LED VCC | x | x | x |
+| LED Gnd | x | x | x |
+| Boot    | GPIO16 | 36 | 18 |
+| Boot Gnd | GND | 34 | 17 |
 
 ## Shared Pins
 
