@@ -45,6 +45,9 @@
 | PCM DOUT | GPIO21 | 40 | 20 |
 
 ## Power Button
+
+Ref: https://gist.github.com/lbussy/9e81cbcc617952f1250e353bd42e7775
+
 | Desc | BCM | PIN | Pin Column |
 | - | - | - | - |
 | LED VCC | x | x | x |
