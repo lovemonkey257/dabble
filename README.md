@@ -151,6 +151,10 @@ dtparam=audio=off
 dtoverlay=vc4-kms-v3d,noaudio
 dtoverlay=max98357a
 dtoverlay=i2s-mmap
+
+# Power button
+dtoverlay=gpio-shutdown,debounce=500   
+dtoverlay=gpio-led,gpio=3,label=pwrled,trigger=default-on,active_low=0 
 ```
 
 ```
