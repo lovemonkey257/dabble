@@ -215,6 +215,10 @@ class RadioPlayer():
         FICDecoder: SId 0xC4CD: programme service label 'Radio X' ('Radio X')
         PADChangeDynamicLabel SId 0xC4CD Label:'Radio X - Get Into the Music'
         PADChangeDynamicLabel SId 0xC4CD Label:'On Air Now on Radio X: Dan Gasser'        
+
+        Proposed change, based on my PR, to format of PAD line
+        DABlinText: PADChangeDynamicLabel Label: 'Playing... Man I Feel Like A Woman -- Shania Twain'
+
         '''
         # pad_label removed start_of_line anchor which may help when reception is challanging and eti_cmdline
         # pumps out errors
@@ -222,7 +226,9 @@ class RadioPlayer():
         self.dablin_stderr_lookups = {
             "dab_type":  re.compile(f"^FICDecoder: SId {self.sid}: audio service \(SubChId\s+\d+, (?P<v>.*), primary\)", re.IGNORECASE),
             "prog_type": re.compile(f"^FICDecoder: SId {self.sid}: programme type \(static\): '(?P<v>.*)'", re.IGNORECASE),
-            "pad_label": re.compile(f"PADChangeDynamicLabel SId {self.sid} Label:'(?P<v>.+)'", re.IGNORECASE),
+            # "pad_label": re.compile(f"PADChangeDynamicLabel SId {self.sid} Label:'(?P<v>.+)'", re.IGNORECASE),
+            "pad_label": re.compile(f"DABlinText: PADChangeDynamicLabel Label: '(?P<v>.+)'", re.IGNORECASE),
+            "dl+label":  re.compile(f"DABlinText: PADChangeDynamicLabel DLPlusType: .+ DLPlusText: '(?P<v>.+)'", re.IGNORECASE),
             "media_fmt": re.compile(f"^EnsemblePlayer: format: (?P<v>.*)", re.IGNORECASE),
             "no_signal": re.compile(f"^There does not seem to be a DAB signal here", re.IGNORECASE)
         }
