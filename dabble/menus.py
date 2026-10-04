@@ -64,7 +64,6 @@ class PlayerMode(Enum):
     AIRPLAY = 1
 
 class RadioMachine(StateMachine):
-
     previous_state        = None
     mode                  = PlayerMode.RADIO
 
