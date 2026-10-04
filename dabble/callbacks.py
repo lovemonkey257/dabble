@@ -250,8 +250,8 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
     Station Name == Artist
     PAD          == Track Title
     Status       == Album
-
     '''
+
     topic_components = msg.topic.split("/",2)
     if len(topic_components)<2:
         logger.info("Cannot parse MQTT Topic:%s - %s", msg.topic, payload)
@@ -266,6 +266,9 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
 
     if base_topic=="dabble-radio":
         match cmd:
+            case "shutdown":
+                logger.info("Updating PAD to reflect %s name %s", cmd, payload)
+                ui.state.update_pad(payload, priority=True)
             case "client_name":
                 ui.state.client_name = payload
                 logger.info("Inbound Airplay connection from: %s", ui.state.client_name)
@@ -354,6 +357,12 @@ def pad_update_handler(ui, updates):
         ui.state.update_pad(pad)
         ui.state.awaiting_signal = False
         logger.info(f"PAD msg: \"{pad}\"")
+
+    elif updates.is_updated('dl+label'):
+        pad = updates.get('pad_label').value
+        ui.state.update_pad(pad)
+        ui.state.awaiting_signal = False
+        logger.info(f"DL+ msg: \"{pad}\" tag ignored at moment")
 
     elif updates.is_updated('media_fmt'):
         ui.state.awaiting_signal = False
