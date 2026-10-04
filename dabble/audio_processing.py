@@ -11,6 +11,7 @@ import numpy as np
 import threading
 from copy import copy,deepcopy
 from enum import Enum,StrEnum
+from scipy.signal import butter, filtfilt, lfilter
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +240,11 @@ class AudioProcessing():
         return (peak_l, peak_r)
 
 
-    def fft(self, signal, is_mono:bool=False, use_window:bool=False, low_pass_cutoff:float=0.0):
+    def fft(self, signal, 
+            is_mono:bool=False, 
+            use_window:bool=True, 
+            low_pass_cutoff:float=0.0, 
+            truncate_fft_len:int=512):
         '''
         Calc FFT of signal using np.fft routines.
         Windowing reduces spectral anomalies
@@ -253,7 +258,7 @@ class AudioProcessing():
 
         # Use lowpass filter to enhance lower frequencies so viz has more energy
         if low_pass_cutoff>0.0:
-            nyq_freq = float(self.state.audio_processor.sample_rate)/2.0
+            nyq_freq = float(self.sample_rate)/2.0
             normalised_cutoff = low_pass_cutoff/nyq_freq
             b, a  = butter(4, normalised_cutoff, btype='lowpass', analog=False)
             mono_signal = filtfilt(b, a, mono_signal)
@@ -263,18 +268,19 @@ class AudioProcessing():
 
         # FFT magic
         fft_data        = np.abs(np.fft.rfft(windowed_signal))
+        fft_freq        = np.fft.rfftfreq(len(windowed_signal), d=1/self.sample_rate)
 
         # FFT spectrum seems to be repeated so take what looks like
         # first "chunk" of repeated data also scale down
         # TODO: Really should work out why this happens. Documentation is unclear
         #       how this would work. ? problem with USB audio ?
-        fft_spectrum = fft_data[0:512]/1000 #10000
+        fft_spectrum = fft_data[0:truncate_fft_len]/1000 #10000
 
         # Use square root scaling to enhance freq plot otherwise simple
         # linear scaling results in flat spectrum. Need more energy to be
         # shown
         # TODO: Should this be here or in the visualiser code?
-        fft_spectrum = np.sqrt(fft_spectrum)
+        #fft_spectrum = np.sqrt(fft_spectrum)
 
         # Max value
         max_magnitude = np.max(fft_spectrum)
@@ -282,6 +288,6 @@ class AudioProcessing():
             # Avoid division by zero
             max_magnitude=0.01
 
-        return (max_magnitude, fft_spectrum)
+        return (max_magnitude, fft_spectrum, fft_freq)
 
 

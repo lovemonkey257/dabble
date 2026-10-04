@@ -9,12 +9,12 @@ import st7735
 import json
 import numpy as np
 import dbus
+import librosa
 from datetime import datetime
 
 from dataclasses import dataclass, field
 from enum import Enum,StrEnum
 from pathlib import Path
-from scipy.signal import butter, filtfilt, lfilter
 from PIL import Image, ImageDraw, ImageFont
 
 from . import exceptions, menus, encoder
@@ -149,12 +149,12 @@ class UIState():
         setattr(self, prop, value)
         return getattr(self, prop)
 
-    def update_pad(self, pad):
+    def update_pad(self, pad, priority:bool=False):
         '''
         Update PAD message, but don't change current one otherwise
         quickly changing PADs are disconcerting. 
         '''
-        if self.last_pad_message == "":
+        if self.last_pad_message == "" or priority:
             self.last_pad_message = pad
         else:
             self.next_pad_message = pad
@@ -297,6 +297,10 @@ class LCDUI():
 
         self._icount=0
 
+        # Visualisation
+        # How "active" is the display, lower is more energetic
+        self.gamma = 0.3
+
     def get_font_path(self, style):
         fp=str(self.font_dir  / f'{self.base_font}-{style}.ttf')
         logging.info("Font path: %s", fp)
@@ -344,8 +348,8 @@ class LCDUI():
                     #self.graphic_equaliser(self.state.audio_processor.signal(), base_y=28, height=35)
                     self.graphic_equaliser(self.state.audio_processor.signal(), base_y=26, height=37)
                 case GraphicState.GRAPHIC_EQUALISER_BARS:
-                    #self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=28, height=35, num_bars=32)
-                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=26, height=37, num_bars=32)
+                    #self.graphic_equaliser_bars_deprecated(self.state.audio_processor.signal(), base_y=28, height=35, num_bars=32)
+                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=26, height=37, num_bars=40) # 32
                 case GraphicState.WAVEFORM:
                     #self.waveform(self.state.audio_processor.signal(), base_y=28, height=35)
                     self.waveform(self.state.audio_processor.signal(), base_y=26, height=36)
@@ -365,7 +369,7 @@ class LCDUI():
         with self._lock:
             t1=time.time_ns()
 
-            # Normal display
+            # Standby?
             if self.state.radio_state.standby.is_active:
                 self.clear_screen()
                 self.draw_clock()
@@ -373,6 +377,7 @@ class LCDUI():
                 self.update(img=dimmed_image)
                 return
 
+            # Normal UI display....
             # If we have no vis OR no signals then make sure we clear the station name area or
             # we will get smudges as viz doesnt draw when no signal
             clear_sn = not self.state.visualiser_enabled or \
@@ -382,6 +387,7 @@ class LCDUI():
             vol_bar_y = self.HEIGHT - 24
 
             if reset_scroll:
+                # Set position of station name to right of display
                 self.reset_station_name_scroll()
 
             # Scroll station name
@@ -417,8 +423,7 @@ class LCDUI():
                 self.draw_ensemble(self.state.ensemble, clear=True)
                 self.draw_dab_type(self.state.dab_type, clear=True)
 
-            # Otherwise draw album name
-            # Scroll if too big
+            # Otherwise draw album name and scroll if too big
             elif self.state.radio_state.mode == menus.PlayerMode.AIRPLAY:
                 if len(self.state.album)>20:
                     self.scroll_status()
@@ -433,12 +438,12 @@ class LCDUI():
             else:
                 self.draw_levels(self.state.audio_processor.peak_l, self.state.audio_processor.peak_r, y=self.HEIGHT-1)
 
+            # Use for layout purposes (is this debug code??)
             if draw_centre_lines:
                 self.draw.line((self.CENTRE_WIDTH, 0, self.CENTRE_WIDTH, self.HEIGHT),  fill='gray')
                 self.draw.line((0, self.CENTRE_HEIGHT, self.WIDTH, self.CENTRE_HEIGHT), fill='gray')
 
             # If we're selecting menus then dim background and draw current menu selection
-            # if menus are active draw over dimmed background
             dimmed_image=None
             if self.state.radio_state.left_menu_activated.is_active or \
                self.state.radio_state.right_menu_activated.is_active or \
@@ -465,15 +470,17 @@ class LCDUI():
             self._fps += 1 
 
 
-    def update(self,img=None):
+    def update(self,img=None, capture_images:bool=False):
         '''
         Update LCD. Use img or, or if none, the class image
         '''
         i = self.img if img is None else img
         self.disp.display(i)
         ## Save image
-        #i.save(f'capture-{self._icount}.png')
-        #self._icount+=1
+        if capture_images:
+            i.save(f'capture-{self._icount:06}.png')
+            self._icount+=1
+
 
     def _get_text_hw_and_bb(self, t:str, font=None):
         '''
@@ -516,6 +523,7 @@ class LCDUI():
         '''
         self.draw.rectangle((0,y,self.WIDTH,y+1), (0, 0, 0))
 
+
     def draw_levels(self, l:int, r:int, y:int=1, decay:int=1, rainbow:bool=False):
         '''
         Draw levels
@@ -550,6 +558,7 @@ class LCDUI():
             self.draw.point((c+self.last_max_r_level,y),fill=self.state.theme.viz_dot)
             self.last_max_r_level -= decay
 
+
     def draw_mode(self, clear:bool=True):
         '''
         Draw Mode e.g. Airplay or Radio
@@ -565,8 +574,10 @@ class LCDUI():
            
         # TODO: ?Calc text width, so no hardcoded x coords?
         # TODO: Themes will break this if the ensemble pt size is changed
+        # TODO: Should it display just one mode i.e. either Radio or Airplay not both?
         self.draw.text( (0, y1),"Radio" ,  font=self.ensemble_font, fill=ra_col, anchor="lt")
         self.draw.text( (35,y1),"Airplay", font=self.ensemble_font, fill=ap_col, anchor="lt")
+
 
     def draw_status(self, t:str, clear:bool=True):
         '''
@@ -683,7 +694,7 @@ class LCDUI():
             self._pause_status_timer.start(pause_for)
 
         self.status_x += int(speed)
-        # Rotate back 
+        # Reset to right-hand of screen, as an offset from max X
         if self.status_x >= self.status_size_x + self.WIDTH:
             self.status_x = 0
 
@@ -704,7 +715,7 @@ class LCDUI():
             self._pause_station_timer.start(pause_for)
 
         self.station_name_x += int(speed)
-        # Rotate back 
+        # Reset to right-hand of screen, as an offset from max X
         if self.station_name_x >= self.station_name_size_x + self.WIDTH:
             self.station_name_x = 0
             self.state.get_next_message()
@@ -733,7 +744,7 @@ class LCDUI():
             (x + bar_margin + fill_width, bar_y + bar_height)], fill=self.state.theme.volume)
 
 
-    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=2, use_log_scale:bool=False, is_mono:bool=False):
+    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=False, is_mono:bool=False):
         '''
         Show frequencies using fft
         '''
@@ -743,7 +754,7 @@ class LCDUI():
         if width==0:
             width=self.WIDTH
 
-        (max_magnitude, fft_spectrum) = self.state.audio_processor.fft(signal, is_mono=is_mono)
+        (max_magnitude, fft_spectrum, fft_freq) = self.state.audio_processor.fft(signal, is_mono=is_mono)
         scale:float = float(height)/max_magnitude
 
         # Clear existing graphics
@@ -755,12 +766,19 @@ class LCDUI():
         num_bins = len(fft_spectrum)
 
         # self.draw.line ( (0, self.HEIGHT - base_y - height, self.WIDTH , self.HEIGHT - base_y - height), fill=self.state.theme.viz_line)
+        prev_bin_index = 0
         for x in range(0,self.WIDTH,1):
             # Map x pixel to FFT bin index
-            bin_index = int((x / self.WIDTH) * num_bins)
+            bin_index = int((x / self.WIDTH) * num_bins)+10
             if bin_index >= num_bins:
                 bin_index = num_bins - 1
-            y = int(fft_spectrum[bin_index] * scale)
+            # y = int(fft_spectrum[bin_index] * scale)
+            if bin_index>prev_bin_index:
+                y = int(np.max(fft_spectrum[prev_bin_index:bin_index]) * scale)
+            else:
+                y = int(fft_spectrum[bin_index] * scale)
+
+            prev_bin_index=bin_index
             # Draw line and dot
             self.draw.line ([
                 (x, self.HEIGHT - base_y), 
@@ -780,7 +798,70 @@ class LCDUI():
                 self.last_max_signal[x] -= fall_decay
 
 
-    def graphic_equaliser_bars(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=True, num_bars:int=32, is_mono:bool=False):
+    def graphic_equaliser_bars(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=4, use_log_scale:bool=False, num_bars:int=32, is_mono:bool=False):
+        '''
+        Show frequencies using fft, grouped into num_bars (default 32) bins.
+        Uses librosa to create a mel filter to break FFT down into freq ranges
+        and display those rather than raw freq magnitudes direct from the FFT
+        '''
+        if signal is None:
+            return
+        if width == 0:
+            width = self.WIDTH
+
+        (max_magnitude, fft_spectrum, fft_freq) = self.state.audio_processor.fft(signal, is_mono=is_mono)
+
+        # TODO: Move this constant into audio_processor
+        N=1023
+
+        # Create mel filterbank
+        mel_filterbank = librosa.filters.mel(sr=self.state.audio_processor.sample_rate, \
+                                             n_fft=N, \
+                                             n_mels=num_bars)
+        mel_mags = mel_filterbank @ (fft_spectrum ** 2)
+        # Scale and emphasise.
+        # Need to abs values as they can be negative and gamma at 0.5 is optimised
+        # into a sqrt which will error.
+        scaled = np.abs(mel_mags) ** self.gamma
+        scale  = height/(np.max(scaled) + 0.001)
+        
+        # Freq centres
+        #mel_centers = librosa.mel_frequencies(num_bars, fmin=0, fmax=self.state.audio_processor.sample_rate/2)
+
+        # Bin the FFT magnitudes into num_bars
+        bin_size  = len(mel_mags) // num_bars
+        bar_width = width // num_bars
+
+        # Clear area
+        self.draw.rectangle([
+            (0, self.HEIGHT - height - base_y), 
+            (self.WIDTH, self.HEIGHT - base_y)], 
+            fill="black")
+
+        for x in range(0,num_bars):
+            bar_height = int(scaled[x] * scale)
+            if bar_height>height:
+                bar_height=height
+            x1 = x * bar_width
+            x2 = x1 + bar_width - 2
+
+            # Draw the bar (rectangle)
+            self.draw.rectangle([
+                (x1, self.HEIGHT - base_y - bar_height), 
+                (x2, self.HEIGHT - base_y)], fill=self.state.theme.viz_line, width=1)
+
+            if bar_height > self.last_max_signal[x]:
+                self.last_max_signal[x] = bar_height
+
+            if self.last_max_signal[x]>0:
+                self.draw.line([
+                    (x1, self.HEIGHT - base_y - self.last_max_signal[x]), 
+                    (x2, self.HEIGHT - base_y - self.last_max_signal[x])], 
+                    fill=self.state.theme.viz_dot, width=1)
+                self.last_max_signal[x] -= fall_decay
+
+
+    def graphic_equaliser_bars_deprecated(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=False, num_bars:int=32, is_mono:bool=False):
         '''
         Show frequencies using fft, grouped into num_bars (default 32) bins.
         '''
@@ -789,7 +870,7 @@ class LCDUI():
         if width == 0:
             width = self.WIDTH
 
-        (max_magnitude, fft_spectrum) = self.state.audio_processor.fft(signal, is_mono=is_mono)
+        (max_magnitude, fft_spectrum, fft_freq) = self.state.audio_processor.fft(signal, is_mono=is_mono)
         scale:float = float(height)/max_magnitude
 
         # Bin the FFT magnitudes into num_bars
@@ -803,13 +884,14 @@ class LCDUI():
             fill="black")
 
         for x in range(0,num_bars):
-            start = x * bin_size
+            start = x * bin_size 
             end   = start + bin_size
             if end > len(fft_spectrum):
                 end = len(fft_spectrum)
             # Aggregate magnitude within the bin
             # For first bar (bass) use mean as it looks better
-            bar_value  = np.max(fft_spectrum[start:end]) if x>0 else np.mean(fft_spectrum[start:end])*1.5
+            #bar_value  = np.max(fft_spectrum[start:end]) if x>0 else np.mean(fft_spectrum[start:end])*1.5
+            bar_value  = np.max(fft_spectrum[start:end])
             bar_height = int(bar_value * scale)
             if bar_height>height:
                 bar_height=height
