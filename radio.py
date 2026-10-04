@@ -173,6 +173,7 @@ try:
 except ConnectionRefusedError as e:
     logger.fatal("Cannot connect to MQTT")
 else:
+    logger.info("MQTT connection established")
     mqttc.loop_start()
 
 # Set up menus and callbacks
@@ -225,7 +226,7 @@ try:
         # Stop animations when scanning...
         if not ui.state.radio_state.scanning_for_stations.is_active:
             ui.draw_interface()
-        time.sleep(0.01)
+        time.sleep(0.008)
     # End While
 
 except (KeyboardInterrupt,SystemExit):
