@@ -268,19 +268,14 @@ class AudioProcessing():
 
         # FFT magic
         fft_data        = np.abs(np.fft.rfft(windowed_signal))
-        fft_freq        = np.fft.rfftfreq(len(windowed_signal), d=1/self.sample_rate)
+        #fft_freq        = np.fft.rfftfreq(len(windowed_signal), d=1/self.sample_rate)
+        fft_freq        = None
 
         # FFT spectrum seems to be repeated so take what looks like
         # first "chunk" of repeated data also scale down
         # TODO: Really should work out why this happens. Documentation is unclear
         #       how this would work. ? problem with USB audio ?
-        fft_spectrum = fft_data[0:truncate_fft_len]/1000 #10000
-
-        # Use square root scaling to enhance freq plot otherwise simple
-        # linear scaling results in flat spectrum. Need more energy to be
-        # shown
-        # TODO: Should this be here or in the visualiser code?
-        #fft_spectrum = np.sqrt(fft_spectrum)
+        fft_spectrum = fft_data[0:truncate_fft_len]
 
         # Max value
         max_magnitude = np.max(fft_spectrum)
@@ -289,5 +284,3 @@ class AudioProcessing():
             max_magnitude=0.01
 
         return (max_magnitude, fft_spectrum, fft_freq)
-
-
