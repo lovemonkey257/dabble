@@ -12,10 +12,11 @@ import dbus
 import librosa
 from datetime import datetime
 
+from threading import Event, Lock, Thread
 from dataclasses import dataclass, field
 from enum import Enum,StrEnum
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageColor
 
 from . import exceptions, menus, encoder
 
@@ -295,11 +296,39 @@ class LCDUI():
         self._fps_st = time.time()   # Start of period
         self._fps_et = 0   # End of period (1s)
 
+        # Image counter (if saving images)
         self._icount=0
+
+        # Event object to end animation loop
+        self._end_display_loop = Event()
 
         # Visualisation
         # How "active" is the display, lower is more energetic
-        self.gamma = 0.3
+        self.gamma = 0.2
+
+    def start_lcd_display_loop(self):
+        '''
+        Start the display loop
+        '''
+        logging.info("Starting LCD Display loop..")
+        self._animation_thread=Thread(target=self._display_loop)
+        self._animation_thread.start()
+
+    def _display_loop(self):
+        # Render loop
+        logging.info("LCD Render starts")
+        while True:
+            if self._end_display_loop.is_set():
+                break
+            # Stop animations when scanning...
+            if not self.state.radio_state.scanning_for_stations.is_active:
+                self.draw_interface()
+            time.sleep(0.008)
+        # End While
+
+    def stop_lcd_display_loop(self):
+        self._end_display_loop.set()
+        self._animation_thread.join()
 
     def get_font_path(self, style):
         fp=str(self.font_dir  / f'{self.base_font}-{style}.ttf')
@@ -345,13 +374,10 @@ class LCDUI():
                 self._lock.acquire()
             match self.state.visualiser:
                 case GraphicState.GRAPHIC_EQUALISER:
-                    #self.graphic_equaliser(self.state.audio_processor.signal(), base_y=28, height=35)
                     self.graphic_equaliser(self.state.audio_processor.signal(), base_y=26, height=37)
                 case GraphicState.GRAPHIC_EQUALISER_BARS:
-                    #self.graphic_equaliser_bars_deprecated(self.state.audio_processor.signal(), base_y=28, height=35, num_bars=32)
-                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=26, height=37, num_bars=40) # 32
+                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=26, height=37, num_bars=32)
                 case GraphicState.WAVEFORM:
-                    #self.waveform(self.state.audio_processor.signal(), base_y=28, height=35)
                     self.waveform(self.state.audio_processor.signal(), base_y=26, height=36)
             if with_lock:
                 self._lock.release()
@@ -744,7 +770,11 @@ class LCDUI():
             (x + bar_margin + fill_width, bar_y + bar_height)], fill=self.state.theme.volume)
 
 
-    def graphic_equaliser(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=False, is_mono:bool=False):
+    def graphic_equaliser(self, 
+                          signal, 
+                          base_y:int=0, height:int=60, width:int=0, 
+                          fall_decay:int=3, 
+                          is_mono:bool=False):
         '''
         Show frequencies using fft
         '''
@@ -798,7 +828,27 @@ class LCDUI():
                 self.last_max_signal[x] -= fall_decay
 
 
-    def graphic_equaliser_bars(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=4, use_log_scale:bool=False, num_bars:int=32, is_mono:bool=False):
+    def adjust_saturation(self, color_name, factor):
+        """
+        color_name: e.g. "blue", "#ff0000", "rebeccapurple"
+        factor:     < 1.0 to decrease saturation, > 1.0 to increase
+        """
+        r, g, b = ImageColor.getrgb(color_name)
+        # Normalize to 0–1
+        h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        # Clamp new saturation to [0, 1]
+        s = max(0, min(1, s * factor))
+        # Convert back to RGB
+        r2, g2, b2 = colorsys.hsv_to_rgb(h, s, v)
+        return (round(r2 * 255), round(g2 * 255), round(b2 * 255))
+
+
+    def graphic_equaliser_bars(self, 
+                               signal, 
+                               base_y:int=0, height:int=60, width:int=0, 
+                               fall_decay:int=4, 
+                               num_bars:int=32, 
+                               is_mono:bool=False):
         '''
         Show frequencies using fft, grouped into num_bars (default 32) bins.
         Uses librosa to create a mel filter to break FFT down into freq ranges
@@ -820,16 +870,16 @@ class LCDUI():
                                              n_mels=num_bars)
         mel_mags = mel_filterbank @ (fft_spectrum ** 2)
         # Scale and emphasise.
-        # Need to abs values as they can be negative and gamma at 0.5 is optimised
-        # into a sqrt which will error.
-        scaled = np.abs(mel_mags) ** self.gamma
-        scale  = height/(np.max(scaled) + 0.001)
+        # Need to abs values as they can be negative and gamma at 0.5 
+        # is optimised to sqrt which will error.
+        mel_scaled = np.abs(mel_mags) ** self.gamma
+        scale  = height/(np.max(mel_scaled) + 0.001)
         
         # Freq centres
-        #mel_centers = librosa.mel_frequencies(num_bars, fmin=0, fmax=self.state.audio_processor.sample_rate/2)
+        # mel_centers = librosa.mel_frequencies(num_bars, fmin=0, fmax=self.state.audio_processor.sample_rate/2)
 
         # Bin the FFT magnitudes into num_bars
-        bin_size  = len(mel_mags) // num_bars
+        bin_size  = len(mel_scaled) // num_bars
         bar_width = width // num_bars
 
         # Clear area
@@ -839,16 +889,19 @@ class LCDUI():
             fill="black")
 
         for x in range(0,num_bars):
-            bar_height = int(scaled[x] * scale)
+            bar_height = int(mel_scaled[x] * scale)
             if bar_height>height:
                 bar_height=height
             x1 = x * bar_width
             x2 = x1 + bar_width - 2
 
+            #c=self.adjust_saturation(self.state.theme.viz_line, 1/(1-bar_height))
+
             # Draw the bar (rectangle)
             self.draw.rectangle([
                 (x1, self.HEIGHT - base_y - bar_height), 
-                (x2, self.HEIGHT - base_y)], fill=self.state.theme.viz_line, width=1)
+                (x2, self.HEIGHT - base_y)], 
+                fill=self.state.theme.viz_line, width=1)
 
             if bar_height > self.last_max_signal[x]:
                 self.last_max_signal[x] = bar_height
@@ -914,7 +967,11 @@ class LCDUI():
                 self.last_max_signal[x] -= fall_decay
 
 
-    def waveform(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=4, is_mono:bool=False):
+    def waveform(self, 
+                 signal, 
+                 base_y:int=0, height:int=60, width:int=0, 
+                 fall_decay:int=4, 
+                 is_mono:bool=False):
         '''
         Show waveform (no need for fft)
         '''
