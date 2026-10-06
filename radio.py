@@ -220,7 +220,12 @@ ui.state.rm.add_menu("Exit").action(lambda: callbacks.exit_menu(encoder.EncoderP
 logger.info("Radio starting")
 ui.reset_station_name_scroll()
 
+ui.start_lcd_display_loop()
 try:
+    while True:
+        time.sleep(300)
+
+    '''
     # Render loop
     while True:
         # Stop animations when scanning...
@@ -228,11 +233,14 @@ try:
             ui.draw_interface()
         time.sleep(0.008)
     # End While
+    '''
 
 except (KeyboardInterrupt,SystemExit):
+    ui.stop_lcd_display_loop()
     audio_processor.stream.close()
     audio_processor.p.terminate()
 
     logging.info("Shutting down")
     shutdown(ui=ui,player=player)
+    time.sleep(1)
     logger.info("Radio Hard Stop")
