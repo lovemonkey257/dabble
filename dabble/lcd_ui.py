@@ -9,7 +9,6 @@ import st7735
 import json
 import numpy as np
 import dbus
-import librosa
 from datetime import datetime
 
 from threading import Event, Lock, Thread
@@ -137,6 +136,9 @@ class UIState():
 
     fps:int                        = 0 # Frames Per Sec
     render_time:int                = 0 # Time (in ms) taken to render LCD display
+
+    gamma:float                    = 0.5 # How energetic is viz, lower better
+    num_bars:int                   = 32
 
     shairport_dbus_interface:dbus.Interface  = None                          
 
@@ -292,7 +294,7 @@ class LCDUI():
         self.state = UIState()
 
         # FPS calcs
-        self._fps  = 0     # Count for FPS
+        self._fps    = 0    # Count for FPS
         self._fps_st = time.time()   # Start of period
         self._fps_et = 0   # End of period (1s)
 
@@ -301,10 +303,6 @@ class LCDUI():
 
         # Event object to end animation loop
         self._end_display_loop = Event()
-
-        # Visualisation
-        # How "active" is the display, lower is more energetic
-        self.gamma = 0.2
 
     def start_lcd_display_loop(self):
         '''
@@ -323,14 +321,23 @@ class LCDUI():
             # Stop animations when scanning...
             if not self.state.radio_state.scanning_for_stations.is_active:
                 self.draw_interface()
-            time.sleep(0.008)
+            # TODO: Is it worth calculating this pause to keep frame rate
+            #       constant but not hammer the CPU, most of which is 
+            #       taken up decoding DAB ETI frames?
+            time.sleep(0.005)
         # End While
 
     def stop_lcd_display_loop(self):
+        '''
+        Stop the display thread
+        '''
         self._end_display_loop.set()
         self._animation_thread.join()
 
     def get_font_path(self, style):
+        '''
+        Get the Font path based on the style we want e.g. bold
+        '''
         fp=str(self.font_dir  / f'{self.base_font}-{style}.ttf')
         logging.info("Font path: %s", fp)
         return fp
@@ -364,19 +371,19 @@ class LCDUI():
 
     def draw_viz(self, with_lock:bool=False):
         '''
-        Draw the visualiser
+        Draw the visualiser.  Inspiration winamp. Halcyon days eh
 
-        Inspiration winamp. Halcyon days eh
+        Only use with_lock if using the viz outside of the main loop which 
+        acquires the lock so not needed here.
         '''
-        if self.state.visualiser_enabled:
-            # Only do something if enabled
+        if self.state.visualiser_enabled: # Only do something if viz enabled
             if with_lock:
                 self._lock.acquire()
             match self.state.visualiser:
                 case GraphicState.GRAPHIC_EQUALISER:
                     self.graphic_equaliser(self.state.audio_processor.signal(), base_y=26, height=37)
                 case GraphicState.GRAPHIC_EQUALISER_BARS:
-                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=26, height=37, num_bars=32)
+                    self.graphic_equaliser_bars(self.state.audio_processor.signal(), base_y=26, height=37, num_bars=self.state.num_bars)
                 case GraphicState.WAVEFORM:
                     self.waveform(self.state.audio_processor.signal(), base_y=26, height=36)
             if with_lock:
@@ -387,10 +394,11 @@ class LCDUI():
         '''
         Draw the entire interface
 
+        Note: Coord system for LCD: (0,0) is the top left, (WIDTH,HEIGHT) is bottom right
+
         TODO: Fix positions - make them clearer!? Changing one screws the others particularly when
               having to clear portions of the screen and bits are disabled (which then don't get 
               cleared!)
-
         '''
         with self._lock:
             t1=time.time_ns()
@@ -399,12 +407,12 @@ class LCDUI():
             if self.state.radio_state.standby.is_active:
                 self.clear_screen()
                 self.draw_clock()
-                dimmed_image= Image.eval(self.img, lambda x: x/5)
+                dimmed_image= Image.eval(self.img, lambda x: x//5)
                 self.update(img=dimmed_image)
                 return
 
             # Normal UI display....
-            # If we have no vis OR no signals then make sure we clear the station name area or
+            # If we have no vis OR no signal then make sure we clear the station name area or
             # we will get smudges as viz doesnt draw when no signal
             clear_sn = not self.state.visualiser_enabled or \
                        (self.state.audio_processor.peak_l==0 and self.state.audio_processor.peak_r==0)
@@ -429,7 +437,7 @@ class LCDUI():
                 elif not self.state.have_signal:
                     self.state.last_pad_message = "No Signal"
 
-            # Draw the viz first, so we layer other text on top
+            # Draw the viz first, so we layer text on top
             self.draw_viz()
 
             # Now station name
@@ -462,7 +470,9 @@ class LCDUI():
             if not self.state.levels_enabled:
                 self.clear_levels(y=self.HEIGHT-1)
             else:
-                self.draw_levels(self.state.audio_processor.peak_l, self.state.audio_processor.peak_r, y=self.HEIGHT-1)
+                self.draw_levels(self.state.audio_processor.peak_l, 
+                                 self.state.audio_processor.peak_r, 
+                                 y=self.HEIGHT-1)
 
             # Use for layout purposes (is this debug code??)
             if draw_centre_lines:
@@ -483,14 +493,15 @@ class LCDUI():
             self.update(img=dimmed_image)
 
             # Calc FPS
-            t2=time.time_ns()
+            t2=time.time_ns()                  # in ns
             render_time = ((t2-t1)/1000000000) # converted to seconds
             self._fps_et=time.time()
             # Update per second
             if self._fps_et - self._fps_st>=1:
-                self.state.fps = self._fps
+                self.state.fps         = self._fps
                 self.state.render_time = render_time
                 logger.debug("FPS: %s  Render Time: %s", self.state.fps, self.state.render_time)
+                # Reset second counter and fps count
                 self._fps_st=time.time()
                 self._fps=0
             self._fps += 1 
@@ -508,7 +519,7 @@ class LCDUI():
             self._icount+=1
 
 
-    def _get_text_hw_and_bb(self, t:str, font=None):
+    def _get_text_hw_and_bb(self, t:str, font=None) -> (int,int,int,int,int,int):
         '''
         Get boundingbox, text height and width given text str and font
         '''
@@ -560,22 +571,25 @@ class LCDUI():
         if r>0:
             nr=int(r/100000)
 
-        c=self.WIDTH/2
-        lx1=c-nl-1
-        rx1=c+nr+1
+        centre=self.WIDTH/2
+        lx1, rx1=(centre-nl-1, centre+nr+1)
         l_line_colour_rgb = self.state.theme.viz_dot if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(l/10, 0.8, 0.9))
         r_line_colour_rgb = self.state.theme.viz_dot if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(r/10, 0.8, 0.9))
         self.clear_levels(y=y)
+
         # Draw levels
         self.draw.line((c,y,lx1,y),fill=l_line_colour_rgb, width=1)
         self.draw.line((c,y,rx1,y),fill=r_line_colour_rgb, width=1)
+
         # Draw centre point
         self.draw.point((c,y),fill=self.state.theme.viz_line)
+
         # Calc max
         if nl>self.last_max_l_level:
             self.last_max_l_level=nl
         if nr>self.last_max_r_level:
             self.last_max_r_level=nr
+
         # Draw peaks with decay
         if self.last_max_l_level>0:
             self.draw.point((c-self.last_max_l_level,y),fill=self.state.theme.viz_dot)
@@ -737,7 +751,6 @@ class LCDUI():
             return
 
         if self.station_name_x == (self.WIDTH-speed):
-        #if self.station_name_x%(self.WIDTH-speed) == 0:
             self._pause_station_timer.start(pause_for)
 
         self.station_name_x += int(speed)
@@ -773,10 +786,10 @@ class LCDUI():
     def graphic_equaliser(self, 
                           signal, 
                           base_y:int=0, height:int=60, width:int=0, 
-                          fall_decay:int=3, 
+                          fall_decay:float=0.8, 
                           is_mono:bool=False):
         '''
-        Show frequencies using fft
+        Show all frequencies (max being the width of the screen) using fft
         '''
         if signal is None:
             return
@@ -784,48 +797,35 @@ class LCDUI():
         if width==0:
             width=self.WIDTH
 
-        (max_magnitude, fft_spectrum, fft_freq) = self.state.audio_processor.fft(signal, is_mono=is_mono)
-        scale:float = float(height)/max_magnitude
+        (fft, mel) = self.state.audio_processor.fft(signal, mel_size=width, is_mono=is_mono)
+
+        # Scale and emphasise.
+        # abs values to remove negative value.
+        # Also gamma of 0.5 is optimised as sqrt which will error on -ve mags.
+        mel_scaled = mel ** self.state.gamma
+        scale  = height/(np.max(mel_scaled) + 0.001)
 
         # Clear existing graphics
         self.draw.rectangle([
             (0,self.HEIGHT-height-base_y),
             (self.WIDTH,self.HEIGHT-base_y)], fill="black")
 
-        # Map FFT bins to x-axis
-        num_bins = len(fft_spectrum)
-
-        # self.draw.line ( (0, self.HEIGHT - base_y - height, self.WIDTH , self.HEIGHT - base_y - height), fill=self.state.theme.viz_line)
         prev_bin_index = 0
         for x in range(0,self.WIDTH,1):
-            # Map x pixel to FFT bin index
-            bin_index = int((x / self.WIDTH) * num_bins)+10
-            if bin_index >= num_bins:
-                bin_index = num_bins - 1
-            # y = int(fft_spectrum[bin_index] * scale)
-            if bin_index>prev_bin_index:
-                y = int(np.max(fft_spectrum[prev_bin_index:bin_index]) * scale)
-            else:
-                y = int(fft_spectrum[bin_index] * scale)
-
-            prev_bin_index=bin_index
-            # Draw line and dot
-            self.draw.line ([
-                (x, self.HEIGHT - base_y), 
-                (x , self.HEIGHT - y - base_y)], 
-                            fill=self.state.theme.viz_line, width=1)
-            self.draw.point( 
-                (x, self.HEIGHT - y - base_y), 
-                            fill=self.state.theme.viz_dot)
-            # Draw decay point
+            y = int(mel_scaled[x] * scale)
+            if y > height:
+                y = height
             if y > self.last_max_signal[x]:
                 self.last_max_signal[x] = y
-
             if self.last_max_signal[x]>0:
+                self.draw.line ([
+                    (x, self.HEIGHT - base_y), 
+                    (x , self.HEIGHT - self.last_max_signal[x] - base_y)], 
+                                fill=self.state.theme.viz_line, width=1)
                 self.draw.point(
                         (x , self.HEIGHT - self.last_max_signal[x] - base_y),
                         fill=self.state.theme.viz_dot)
-                self.last_max_signal[x] -= fall_decay
+                self.last_max_signal[x] *= fall_decay
 
 
     def adjust_saturation(self, color_name, factor):
@@ -846,7 +846,7 @@ class LCDUI():
     def graphic_equaliser_bars(self, 
                                signal, 
                                base_y:int=0, height:int=60, width:int=0, 
-                               fall_decay:int=4, 
+                               fall_decay:float=0.8, 
                                num_bars:int=32, 
                                is_mono:bool=False):
         '''
@@ -859,112 +859,54 @@ class LCDUI():
         if width == 0:
             width = self.WIDTH
 
-        (max_magnitude, fft_spectrum, fft_freq) = self.state.audio_processor.fft(signal, is_mono=is_mono)
+        (fft, mel) = self.state.audio_processor.fft(signal, mel_size=num_bars, is_mono=is_mono)
 
-        # TODO: Move this constant into audio_processor
-        N=1023
-
-        # Create mel filterbank
-        mel_filterbank = librosa.filters.mel(sr=self.state.audio_processor.sample_rate, \
-                                             n_fft=N, \
-                                             n_mels=num_bars)
-        mel_mags = mel_filterbank @ (fft_spectrum ** 2)
         # Scale and emphasise.
-        # Need to abs values as they can be negative and gamma at 0.5 
-        # is optimised to sqrt which will error.
-        mel_scaled = np.abs(mel_mags) ** self.gamma
+        # abs values to remove negative value.
+        # Also gamma of 0.5 is optimised as sqrt which will error on -ve mags.
+        mel_scaled = mel ** self.state.gamma
         scale  = height/(np.max(mel_scaled) + 0.001)
         
-        # Freq centres
-        # mel_centers = librosa.mel_frequencies(num_bars, fmin=0, fmax=self.state.audio_processor.sample_rate/2)
-
-        # Bin the FFT magnitudes into num_bars
-        bin_size  = len(mel_scaled) // num_bars
-        bar_width = width // num_bars
-
         # Clear area
         self.draw.rectangle([
-            (0, self.HEIGHT - height - base_y), 
+            (0, self.HEIGHT - height - base_y -1), 
             (self.WIDTH, self.HEIGHT - base_y)], 
             fill="black")
 
+        bar_width = width // num_bars
         for x in range(0,num_bars):
             bar_height = int(mel_scaled[x] * scale)
             if bar_height>height:
                 bar_height=height
             x1 = x * bar_width
-            x2 = x1 + bar_width - 2
+            x2 = x1 + bar_width - 2 if bar_width>=2 else x1 + bar_width
 
-            #c=self.adjust_saturation(self.state.theme.viz_line, 1/(1-bar_height))
-
-            # Draw the bar (rectangle)
-            self.draw.rectangle([
-                (x1, self.HEIGHT - base_y - bar_height), 
-                (x2, self.HEIGHT - base_y)], 
-                fill=self.state.theme.viz_line, width=1)
 
             if bar_height > self.last_max_signal[x]:
                 self.last_max_signal[x] = bar_height
 
             if self.last_max_signal[x]>0:
+                c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+self.last_max_signal[x]/100)) 
+                self.draw.rectangle([
+                    (x1, self.HEIGHT - base_y - self.last_max_signal[x]-1), 
+                    (x2, self.HEIGHT - base_y)], 
+                    fill=c,
+                    #self.state.theme.viz_line, 
+                    width=1)
                 self.draw.line([
                     (x1, self.HEIGHT - base_y - self.last_max_signal[x]), 
                     (x2, self.HEIGHT - base_y - self.last_max_signal[x])], 
                     fill=self.state.theme.viz_dot, width=1)
-                self.last_max_signal[x] -= fall_decay
-
-
-    def graphic_equaliser_bars_deprecated(self, signal, base_y:int=0, height:int=60, width:int=0, fall_decay:int=3, use_log_scale:bool=False, num_bars:int=32, is_mono:bool=False):
-        '''
-        Show frequencies using fft, grouped into num_bars (default 32) bins.
-        '''
-        if signal is None:
-            return
-        if width == 0:
-            width = self.WIDTH
-
-        (max_magnitude, fft_spectrum, fft_freq) = self.state.audio_processor.fft(signal, is_mono=is_mono)
-        scale:float = float(height)/max_magnitude
-
-        # Bin the FFT magnitudes into num_bars
-        bin_size  = len(fft_spectrum) // num_bars
-        bar_width = width // num_bars
-
-        # Clear area
-        self.draw.rectangle([
-            (0, self.HEIGHT - height - base_y), 
-            (self.WIDTH, self.HEIGHT - base_y)], 
-            fill="black")
-
-        for x in range(0,num_bars):
-            start = x * bin_size 
-            end   = start + bin_size
-            if end > len(fft_spectrum):
-                end = len(fft_spectrum)
-            # Aggregate magnitude within the bin
-            # For first bar (bass) use mean as it looks better
-            #bar_value  = np.max(fft_spectrum[start:end]) if x>0 else np.mean(fft_spectrum[start:end])*1.5
-            bar_value  = np.max(fft_spectrum[start:end])
-            bar_height = int(bar_value * scale)
-            if bar_height>height:
-                bar_height=height
-            x1 = x * bar_width
-            x2 = x1 + bar_width - 2
-
-            # Draw the bar (rectangle)
-            self.draw.rectangle([
-                (x1, self.HEIGHT - base_y - bar_height), 
-                (x2, self.HEIGHT - base_y)], fill=self.state.theme.viz_line, width=1)
-
-            if bar_height > self.last_max_signal[x]:
-                self.last_max_signal[x] = bar_height
-
-            if self.last_max_signal[x]>0:
-                self.draw.line([
-                    (x1, self.HEIGHT - base_y - self.last_max_signal[x]), 
-                    (x2, self.HEIGHT - base_y - self.last_max_signal[x])], 
-                    fill=self.state.theme.viz_dot, width=1)
-                self.last_max_signal[x] -= fall_decay
+                self.last_max_signal[x] *= fall_decay
+            else:
+                # Draw the bar (rectangle)
+                c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+bar_height/100)) if bar_height>0 else self.state.theme.viz_line
+                self.draw.rectangle([
+                    (x1, self.HEIGHT - base_y - bar_height - 1), 
+                    (x2, self.HEIGHT - base_y)], 
+                    fill=c,
+                    #self.state.theme.viz_line, 
+                    width=1)
 
 
     def waveform(self, 
