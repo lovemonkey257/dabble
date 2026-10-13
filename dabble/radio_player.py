@@ -154,11 +154,10 @@ class RadioPlayer():
         self.ensemble=""
         self.channel=""
         self.sid=""
+        self.gain:int=70
         self.radio_stations = radio_stations
         self.multiplexes = list()
-        # TODO: Parameterise gain (-g). Auto-gain does work but sometimes need to boost
-        #self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -I -g 70')
-        self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -g 70')
+        self.play_cmdline=Template('/usr/local/bin/dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c $channel -s $sid -g $gain -L')
         self.scan_cmdline=Template('/usr/local/bin/eti-cmdline-rtlsdr -J -x -C $block -D $scantime -Q')
         self._pad_update_handler = pad_update_handler
 
@@ -182,15 +181,16 @@ class RadioPlayer():
         self.dablin_log_parser.pad_update_handler = self._pad_update_handler
 
         self._recv_errors=0
-        self.playing = name
 
         if (station_details:=self.radio_stations.tuning_details(name)) is not None:
+            self.playing = name
             logger.info("Station details: %s", station_details)
             (self.channel, self.sid, self.ensemble) = station_details
         else:
-            # Name of station wrong/not found. This should not happen
-            logger.warn("Station name error: %s", name)
-            return False
+            (name, station_details) =self.radio_stations.select_station(0)
+            logger.error("Config returned no station name. Assuming station 0. Station details: %s", station_details)
+            (self.channel, self.sid, self.ensemble) = station_details
+            self.playing = name
 
         # This is run in parallel so will not block
         # Sound sent straight to sound card via SDL
@@ -198,7 +198,8 @@ class RadioPlayer():
             shlex.split(
                 self.play_cmdline.substitute({
                     "channel":self.channel,
-                    "sid": self.sid
+                    "sid": self.sid,
+                    "gain": self.gain
                 })
             ),
             stderr=subprocess.PIPE
