@@ -166,6 +166,7 @@ def change_station(ui,player,audio_processor):
     TODO: Do we need to press encoder to select or auto select or
           is it configurable?
     '''
+    logger.info(f'Mode: {ui.state.radio_state.mode}')
     if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY:
         # Disable change station when in airplay mode
         return
@@ -266,9 +267,31 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
 
     if base_topic=="dabble-radio":
         match cmd:
+            case "melfmin":
+                logger.info("Updating %s to %s", cmd, payload)
+                f=int(payload)
+                if f<20 or f>20000:
+                    f=20
+                audio_processor.update("mel_filter_fmin", f)
+            case "melfmax":
+                logger.info("Updating %s to %s", cmd, payload)
+                f=int(payload)
+                if f<20 or f>20000:
+                    f=20
+                audio_processor.update("mel_filter_fmax", f)
+            case "gfxbars":
+                logger.info("Updating %s to %s", cmd, payload)
+                b=int(payload)
+                if b<0 or b>64:
+                    b=64
+                ui.state.update("num_bars", b)
+            case "gamma":
+                logger.info("Updating %s to %s", cmd, payload)
+                ui.state.update("gamma", float(payload))
             case "shutdown":
                 logger.info("Updating PAD to reflect %s name %s", cmd, payload)
                 ui.state.update_pad(payload, priority=True)
+
             case "client_name":
                 ui.state.client_name = payload
                 logger.info("Inbound Airplay connection from: %s", ui.state.client_name)
@@ -325,6 +348,7 @@ def change_mode(mode, mqtt_client, ui, player):
         ui.state.shairport_dbus_interface.Pause()
         logger.info("Radio enabled. Station: %s", ui.state.last_station_name)
         ui.state.radio_state.mode = menus.PlayerMode.RADIO
+        ui.state.last_pad_message = ""
         ui.state.station_name = ui.state.last_station_name 
         player.play(ui.state.station_name)
         ui.state.ensemble = player.ensemble
