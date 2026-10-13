@@ -1,19 +1,18 @@
 import pyaudio
 
 p = pyaudio.PyAudio()
-
-print('Available devices:')
+print(f"   {'Dev name':32} {'In':3} {'Out':3} {'SR':5}")
 for i in range(p.get_device_count()):
         dev = p.get_device_info_by_index(i)
-        name = dev['name'] # .encode('utf-8')
-        print("index:", i, name, dev['maxInputChannels'], dev['maxOutputChannels'], dev['defaultSampleRate'])
+        name = dev['name'].strip() # .encode('utf-8')
+        print(f"{i:2} {name:32} {dev['maxInputChannels']:3} {dev['maxOutputChannels']:3} {dev['defaultSampleRate']:5}")
 
 print('\nDefault input device:')
 info = p.get_default_input_device_info()
-print(f'Index: {info["index"]}\n\tName: {info["name"]} Max Input Channels: {info["maxInputChannels"]} Max Output Channels: {info["maxOutputChannels"]} Sample Rate: {info["defaultSampleRate"]}')
+print(f'{info["index"]}\n\tName: {info["name"]} Max Input Channels: {info["maxInputChannels"]} Max Output Channels: {info["maxOutputChannels"]} Sample Rate: {info["defaultSampleRate"]}')
 print('\nDefault output device:')
 info = p.get_default_output_device_info()
-print(f'Index: {info["index"]}\n\tName: {info["name"]} Max Input Channels: {info["maxInputChannels"]} Max Output Channels: {info["maxOutputChannels"]} Sample Rate: {info["defaultSampleRate"]}')
+print(f'{info["index"]}\n\tName: {info["name"]} Max Input Channels: {info["maxInputChannels"]} Max Output Channels: {info["maxOutputChannels"]} Sample Rate: {info["defaultSampleRate"]}')
 
 p.terminate()
 
