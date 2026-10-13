@@ -1,0 +1,13 @@
+[Unit]
+Description=Radio Shutdown Script
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target
+Conflicts=shutdown.target reboot.target halt.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/usr/local/bin/radio-shutdown.sh
+
+[Install]
+WantedBy=sysinit.target
