@@ -350,6 +350,11 @@ def change_mode(mode, mqtt_client, ui, player):
         ui.state.shairport_dbus_interface.Pause()
         logger.info("Radio enabled. Station: %s", ui.state.last_station_name)
         ui.state.radio_state.update("mode",menus.PlayerMode.RADIO)
+
+        # WIP: Set left encoder to change station!
+        ui.state.left_encoder.device.when_rotated_clockwise          = lambda: change_station(ui,player,audio_processor)
+        ui.state.left_encoder.device.when_rotated_counter_clockwise  = lambda: change_station(ui,player,audio_processor)
+
         ui.state.last_pad_message = ""
         ui.state.station_name = ui.state.last_station_name 
         player.play(ui.state.station_name)
