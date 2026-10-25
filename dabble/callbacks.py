@@ -127,6 +127,9 @@ def play_new_station(ui,player,audio_processor):
     '''
     New station selected, now play it
     '''
+    # Ensure mode is Radio
+    ui.state.radio_state.update("mode",menus.PlayerMode.RADIO)
+
     # Cancel timer
     ui.state.station_timer.terminate()
 
@@ -291,7 +294,6 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
             case "shutdown":
                 logger.info("Updating PAD to reflect %s name %s", cmd, payload)
                 ui.state.update_pad(payload, priority=True)
-
             case "client_name":
                 ui.state.client_name = payload
                 logger.info("Inbound Airplay connection from: %s", ui.state.client_name)
@@ -302,14 +304,14 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
                 ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
             case "active_start":
                 logger.info("Airplay activated, Radio should shutdown")
-                ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
+                ui.state.radio_state.update("mode",menus.PlayerMode.AIRPLAY)
                 # Save the station name
                 ui.state.last_station_name = ui.state.station_name 
                 if player:
                     player.stop()
             case "active_end":
                 logger.info("Airplay deactivated, Radio should start up again. Station: %s", ui.state.last_station_name)
-                ui.state.radio_state.mode = menus.PlayerMode.RADIO
+                ui.state.radio_state.update("mode",menus.PlayerMode.RADIO)
                 ui.state.station_name = ui.state.last_station_name 
                 if player:
                     player.play(ui.state.station_name)
@@ -347,7 +349,7 @@ def change_mode(mode, mqtt_client, ui, player):
         logger.info("Telling shairplay to stop playing")
         ui.state.shairport_dbus_interface.Pause()
         logger.info("Radio enabled. Station: %s", ui.state.last_station_name)
-        ui.state.radio_state.mode = menus.PlayerMode.RADIO
+        ui.state.radio_state.update("mode",menus.PlayerMode.RADIO)
         ui.state.last_pad_message = ""
         ui.state.station_name = ui.state.last_station_name 
         player.play(ui.state.station_name)
@@ -355,7 +357,7 @@ def change_mode(mode, mqtt_client, ui, player):
 
     elif mode == menus.PlayerMode.AIRPLAY:
         logger.info("Airplay activated, Radio should shutdown")
-        ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
+        ui.state.radio_state.update("mode",menus.PlayerMode.AIRPLAY)
         # Save the station name
         ui.state.last_station_name = ui.state.station_name 
         if player:

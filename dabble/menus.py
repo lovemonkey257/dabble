@@ -66,6 +66,7 @@ class PlayerMode(Enum):
 class RadioMachine(StateMachine):
     previous_state        = None
     mode                  = PlayerMode.RADIO
+    _lock                 = threading.Lock()
 
     playing               = State(initial=True)
     selecting_a_station   = State()
@@ -93,6 +94,7 @@ class RadioMachine(StateMachine):
     activate_standby      = selecting_right_menu.to(standby)
     activate_radio        = standby.to(playing)
 
+
     def on_transition(self, event_data, event: Event):
             assert event_data.event == event
             logger.info(
@@ -106,12 +108,23 @@ class RadioMachine(StateMachine):
 
     def update(self, prop, value):
         '''
+        Threadsafe
         Allow state to be changed using <obj>.update("prop",value)
         Means it can be used in lambdas which don't like <obj>.<prop>=<value>
         '''
-        setattr(self, prop, value)
-        logger.info("Changing %s to %s. Actual set to: %s", prop, value, getattr(self,prop))
-        return getattr(self, prop)
+        with self._lock:
+            setattr(self, prop, value)
+            logger.info("Changing %s to %s. Actual set to: %s", prop, value, getattr(self,prop))
+            r=getattr(self, prop)
+        return r
+
+    def get(self, prop):
+        '''
+        Read state but threadsafe
+        '''
+        with self._lock:
+            r=getattr(self, prop)
+        return r
 
 
 @dataclass
