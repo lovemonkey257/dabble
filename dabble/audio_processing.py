@@ -149,15 +149,21 @@ class AudioProcessing():
         # Lock to protect signal buffer updates
         self._lock = threading.Lock()
 
-        # Create a mel filterbank (set when first used)
-        self.mel_filterbank = None
-        self._last_melbank_size = 0
-
         # Set Freq min/max. Max human hearing is around 20-20000
         # Music is a lot less. 30-15000 seems to work well
         # but can be tweaked
-        self.mel_filter_fmin = 30
+        self.mel_filter_fmin = 40
         self.mel_filter_fmax = 15000
+
+        # Create a mel filterbank (set when first used)
+        self.mel_filterbank = None
+
+        # Store last values so we only recreate melbank
+        # when we need to not on every frame
+        self._last_fft_size = 0
+        self._last_bars = 0
+        self._last_mel_fmin = self.mel_filter_fmin
+        self._last_mel_fmax = self.mel_filter_fmax
 
     def update(self, prop, value):
         '''
@@ -304,7 +310,7 @@ class AudioProcessing():
         # Convert to mono, unless already mono i.e. 1 channel in
         mono_signal = signal if is_mono or self.rec_channels==1 else (signal[0::2] + signal[1::2] ) / 2
 
-        # Use lowpass filter to enhance lower frequencies so viz has more energy
+        # low/high pass if needed
         if low_pass_cutoff>0.0 and high_pass_cutoff>0:
             nyq_freq = float(self.sample_rate)/2.0
             low_cutoff  = low_pass_cutoff/nyq_freq
@@ -319,19 +325,27 @@ class AudioProcessing():
         mono_signal = mono_signal * np.hanning(mono_signal_size)
 
         # Calc FFT
-        # TODO: Consider FFT from librosa? Need performance details
         fft = np.abs(np.fft.rfft(mono_signal))
 
         # Create mel filterbank. Update if FFT size changes
+        # Don't create on each call
         fft_size = len(fft)*2-1
-        if fft_size!=self._last_melbank_size:
+        if fft_size!=self._last_fft_size or \
+           mel_size!=self._last_bars or \
+           self.mel_filter_fmin != self._last_mel_fmin or \
+           self.mel_filter_fmax != self._last_mel_fmax or \
+           self.mel_filterbank is None:
+            logger.info("Mel Bank Size updated")
             self.mel_filterbank = librosa.filters.mel(
                     fmin=self.mel_filter_fmin, 
                     fmax=self.mel_filter_fmax,
                     sr=self.sample_rate,
                     n_fft=fft_size,
                     n_mels=mel_size)
-        self._last_melbank_size = fft_size
+            self._last_fft_size = fft_size
+            self._last_bars = mel_size
+            self._last_mel_fmin = self.mel_filter_fmin
+            self._last_mel_fmax = self.mel_filter_fmax
 
         # Get magnitudes for the freqs from the mel filterbank
         # Square the FFT to convert amplitude to power/energy

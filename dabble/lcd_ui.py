@@ -137,10 +137,16 @@ class UIState():
     fps:int                        = 0 # Frames Per Sec
     render_time:int                = 0 # Time (in ms) taken to render LCD display
 
-    gamma:float                    = 0.5 # How energetic is viz, lower better
+    gamma:float                    = 0.3 # How energetic is viz, lower better
     num_bars:int                   = 32
 
     shairport_dbus_interface:dbus.Interface  = None                          
+
+    _lock: threading.Lock          = field(
+            default_factory = threading.Lock,
+            init = False,
+            repr = False,
+            compare = False)
 
     
     def update(self, prop, value):
@@ -149,24 +155,29 @@ class UIState():
         Means it can be used in lambdas which don't like <obj>.<prop>=<value>
         Returns new value (as returned by method not value passed which may not be the same)
         '''
-        setattr(self, prop, value)
-        return getattr(self, prop)
+        with self._lock:
+            setattr(self, prop, value)
+            r = getattr(self, prop)
+        return r
 
     def update_pad(self, pad, priority:bool=False):
         '''
         Update PAD message, but don't change current one otherwise
         quickly changing PADs are disconcerting. 
         '''
-        if self.last_pad_message == "" or priority:
-            self.last_pad_message = pad
-        else:
-            self.next_pad_message = pad
+        with self._lock:
+            if self.last_pad_message == "" or priority:
+                self.last_pad_message = pad
+            else:
+                self.next_pad_message = pad
 
     def get_pad_message(self):
         '''
         Get the PAD message last seen
         '''
-        return self.last_pad_message if self.last_pad_message else ""
+        with self._lock:
+            pad_msg = self.last_pad_message if self.last_pad_message else ""
+        return pad_msg
     
     def get_current_message(self):
         '''
@@ -324,7 +335,7 @@ class LCDUI():
             # TODO: Is it worth calculating this pause to keep frame rate
             #       constant but not hammer the CPU, most of which is 
             #       taken up decoding DAB ETI frames?
-            time.sleep(0.005)
+            #time.sleep(0.005)
         # End While
 
     def stop_lcd_display_loop(self):
@@ -524,7 +535,7 @@ class LCDUI():
         Get boundingbox, text height and width given text str and font
         '''
         (x1,y1,x2,y2) = font.getbbox(t)
-        text_height = abs(y2 - y1)
+        text_height = y2
         text_width  = self.draw.textlength(t, font=font)
         return (x1,y1,x2,y2,text_height,text_width)
 
@@ -599,7 +610,7 @@ class LCDUI():
             self.last_max_r_level -= decay
 
 
-    def draw_mode(self, clear:bool=True):
+    def draw_mode_old(self, clear:bool=True):
         '''
         Draw Mode e.g. Airplay or Radio
         '''
@@ -617,6 +628,19 @@ class LCDUI():
         # TODO: Should it display just one mode i.e. either Radio or Airplay not both?
         self.draw.text( (0, y1),"Radio" ,  font=self.ensemble_font, fill=ra_col, anchor="lt")
         self.draw.text( (35,y1),"Airplay", font=self.ensemble_font, fill=ap_col, anchor="lt")
+
+
+    def draw_mode(self, clear:bool=True):
+        '''
+        Draw Mode e.g. Airplay or Radio
+        '''
+        mode_text = "Radio  " if self.state.radio_state.mode==menus.PlayerMode.RADIO else "Airplay"
+        # Calc bounding box for all text
+        (x1,y1,x2,y2,text_height,text_width) = self._get_text_hw_and_bb(mode_text, font=self.ensemble_font)
+        m = self.CENTRE_WIDTH - text_width//2 
+        if clear:
+            self.draw.rectangle((0,0, text_width, text_height), (0, 0, 0))
+        self.draw.text( (0, 0), mode_text, font=self.ensemble_font, fill=self.state.theme.ensemble, anchor="lt")
 
 
     def draw_status(self, t:str, clear:bool=True):
@@ -810,7 +834,6 @@ class LCDUI():
             (0,self.HEIGHT-height-base_y),
             (self.WIDTH,self.HEIGHT-base_y)], fill="black")
 
-        prev_bin_index = 0
         for x in range(0,self.WIDTH,1):
             y = int(mel_scaled[x] * scale)
             if y > height:
@@ -818,29 +841,15 @@ class LCDUI():
             if y > self.last_max_signal[x]:
                 self.last_max_signal[x] = y
             if self.last_max_signal[x]>0:
+                c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+self.last_max_signal[x]/100)) 
                 self.draw.line ([
                     (x, self.HEIGHT - base_y), 
                     (x , self.HEIGHT - self.last_max_signal[x] - base_y)], 
-                                fill=self.state.theme.viz_line, width=1)
+                                fill=c, width=1)
                 self.draw.point(
                         (x , self.HEIGHT - self.last_max_signal[x] - base_y),
                         fill=self.state.theme.viz_dot)
                 self.last_max_signal[x] *= fall_decay
-
-
-    def adjust_saturation(self, color_name, factor):
-        """
-        color_name: e.g. "blue", "#ff0000", "rebeccapurple"
-        factor:     < 1.0 to decrease saturation, > 1.0 to increase
-        """
-        r, g, b = ImageColor.getrgb(color_name)
-        # Normalize to 0–1
-        h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
-        # Clamp new saturation to [0, 1]
-        s = max(0, min(1, s * factor))
-        # Convert back to RGB
-        r2, g2, b2 = colorsys.hsv_to_rgb(h, s, v)
-        return (round(r2 * 255), round(g2 * 255), round(b2 * 255))
 
 
     def graphic_equaliser_bars(self, 
@@ -875,12 +884,13 @@ class LCDUI():
 
         bar_width = width // num_bars
         for x in range(0,num_bars):
+            if x > len(mel_scaled)-1:
+                continue
             bar_height = int(mel_scaled[x] * scale)
             if bar_height>height:
                 bar_height=height
             x1 = x * bar_width
             x2 = x1 + bar_width - 2 if bar_width>=2 else x1 + bar_width
-
 
             if bar_height > self.last_max_signal[x]:
                 self.last_max_signal[x] = bar_height
@@ -890,9 +900,7 @@ class LCDUI():
                 self.draw.rectangle([
                     (x1, self.HEIGHT - base_y - self.last_max_signal[x]-1), 
                     (x2, self.HEIGHT - base_y)], 
-                    fill=c,
-                    #self.state.theme.viz_line, 
-                    width=1)
+                    fill=c, width=1)
                 self.draw.line([
                     (x1, self.HEIGHT - base_y - self.last_max_signal[x]), 
                     (x2, self.HEIGHT - base_y - self.last_max_signal[x])], 
@@ -904,9 +912,7 @@ class LCDUI():
                 self.draw.rectangle([
                     (x1, self.HEIGHT - base_y - bar_height - 1), 
                     (x2, self.HEIGHT - base_y)], 
-                    fill=c,
-                    #self.state.theme.viz_line, 
-                    width=1)
+                    fill=c, width=1)
 
 
     def waveform(self, 
@@ -952,5 +958,4 @@ class LCDUI():
                 (x, self.HEIGHT - base_y + h) ], fill=self.state.theme.viz_line, width=1)
             self.draw.point( (x , self.HEIGHT - base_y - h), fill=self.state.theme.viz_dot)
             self.draw.point( (x , self.HEIGHT - base_y + h), fill=self.state.theme.viz_dot)
-
 
