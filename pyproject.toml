@@ -12,7 +12,7 @@ dependencies = [
     "librosa==0.11.0",
     "msgpack>=1.2.1",
     "paho-mqtt==2.1.0",
-    "pillow>=12.1.1",
+    "pillow>=13.0.0",
     "pimoroni-ioexpander==1.0.1",
     "pip>=26.2.0",
     "pyalsaaudio==0.11.0",
