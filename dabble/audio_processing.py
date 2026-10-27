@@ -4,6 +4,7 @@ Need: apt-get install python3-alsaaudio
 Volume code: https://askubuntu.com/questions/689521/control-volume-using-python-script
 '''
 
+import warnings
 import logging
 import alsaaudio
 import pyaudio
@@ -121,8 +122,8 @@ class AudioProcessing():
         self._signal = np.zeros(4096)
    
         # Store l/r peak values
-        self.peak_l  = 0
-        self.peak_r  = 0
+        self.peak_l:int  = 0
+        self.peak_r:int  = 0
 
         # Volume is the % value
         # We assume joined volume which is the natual way to change vol
@@ -134,14 +135,14 @@ class AudioProcessing():
         self.db_max = db_min
         logger.info("Mixer DB min: %d, max: %d", self.db_min, self.db_max)
 
-        self.min_volume = 10
-        self.max_volume = 90
+        self.min_volume:int = 10
+        self.max_volume:int = 90
         self.set_volume()
         logger.info(f'Mixer Volume set to {self.volume()}%')
 
-        self.audio_format   = pyaudio.paInt32
-        self.audio_bit_size = np.int32
-        self._max_value     = 2**16
+        self.audio_format:int   = pyaudio.paInt32
+        self.audio_bit_size:int = np.int32
+        self._max_value:int     = 2**16
 
         logger.info(f'Audio Format Size: {self.audio_format}')
         logger.info(f'Audio Bit Size:    {self.audio_bit_size}')
@@ -152,18 +153,18 @@ class AudioProcessing():
         # Set Freq min/max. Max human hearing is around 20-20000
         # Music is a lot less. 30-15000 seems to work well
         # but can be tweaked
-        self.mel_filter_fmin = 40
-        self.mel_filter_fmax = 15000
+        self.mel_filter_fmin:int = 40
+        self.mel_filter_fmax:int = 15000
 
         # Create a mel filterbank (set when first used)
         self.mel_filterbank = None
 
         # Store last values so we only recreate melbank
         # when we need to not on every frame
-        self._last_fft_size = 0
-        self._last_bars = 0
-        self._last_mel_fmin = self.mel_filter_fmin
-        self._last_mel_fmax = self.mel_filter_fmax
+        self._last_fft_size:int = 0
+        self._last_bars:int = 0
+        self._last_mel_fmin:int = self.mel_filter_fmin
+        self._last_mel_fmax:int = self.mel_filter_fmax
 
     def update(self, prop, value):
         '''
@@ -347,9 +348,20 @@ class AudioProcessing():
             self._last_mel_fmin = self.mel_filter_fmin
             self._last_mel_fmax = self.mel_filter_fmax
 
+        # Better freq response...
+        freqs = librosa.fft_frequencies(sr=self.sample_rate, n_fft=fft_size)
+        with warnings.catch_warnings():
+            # Ignore divide by zero
+            warnings.simplefilter("ignore", RuntimeWarning)
+            a_w_db = librosa.A_weighting(freqs)  # shape (n_fft//2+1,), in dB
+        a_w_linear = 10 ** (a_w_db / 10)         # convert to linear gain, 10
+        S_power = fft ** 2
+        S_power *= a_w_linear
+
         # Get magnitudes for the freqs from the mel filterbank
         # Square the FFT to convert amplitude to power/energy
         # which has physical meaning.
-        mel_mags = self.mel_filterbank @ (fft ** 2)
+        #mel_mags = self.mel_filterbank @ (fft ** 2)
+        mel_mags = self.mel_filterbank @ S_power
 
         return (fft, mel_mags)

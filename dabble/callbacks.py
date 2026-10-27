@@ -225,6 +225,8 @@ def initiate_scan(ui, player, audio_processor):
     Initiate a scan
     '''
     print(ui, player, audio_processor)
+    ## TODO: Disable MQTT processing while scanning!
+
     ui.state.radio_state.toggle_scan()
     was_playing = player.playing
     # Scan will reload station list

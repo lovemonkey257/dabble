@@ -160,6 +160,16 @@ class UIState():
             r = getattr(self, prop)
         return r
 
+    def get(self, prop):
+        '''
+        Threadsafe read of properties. Use this in other threads
+        Beware mutable items (list/dict) which will not be safe
+        '''
+        with self._lock:
+            r = getattrs(self,prop)
+        return r
+
+
     def update_pad(self, pad, priority:bool=False):
         '''
         Update PAD message, but don't change current one otherwise
@@ -184,21 +194,24 @@ class UIState():
         Get the current message on the UI, either Station or PAD
         '''
         if self.current_msg == MessageState.STATION:
-            return self.station_name
+            with self._lock:
+                r = self.station_name
         if self.current_msg == MessageState.LAST_PAD:
-            return self.get_pad_message()
+            r = self.get_pad_message()
+        return r
 
     def get_next_message(self):
         '''
         Flip message between station name and PAD (if PAD has been received)
         '''
-        if self.current_msg == MessageState.STATION and self.last_pad_message!="":
-            self.current_msg = MessageState.LAST_PAD
-        elif self.current_msg == MessageState.LAST_PAD:
-            self.current_msg = MessageState.STATION
-        # get next pad message (dont change mid display, only on rotate)
-        if self.next_pad_message!="":
-            self.last_pad_message=self.next_pad_message
+        with self._lock:
+            if self.current_msg == MessageState.STATION and self.last_pad_message!="":
+                self.current_msg = MessageState.LAST_PAD
+            elif self.current_msg == MessageState.LAST_PAD:
+                self.current_msg = MessageState.STATION
+            # get next pad message (dont change mid display, only on rotate)
+            if self.next_pad_message!="":
+                self.last_pad_message=self.next_pad_message
 
     def __post_init__(self):
         sys_dbus = dbus.SystemBus()
