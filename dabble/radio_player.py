@@ -1,3 +1,4 @@
+import locale
 import json
 import logging
 import re
@@ -104,6 +105,7 @@ class DablinLogParser():
             for lu in self._lookups:
                 r=self._lookups[lu].search(l)
                 if r:
+                    logger.debug(r)
                     return ( lu, r.groupdict()['v'] if 'v' in r.groupdict() else "no_data" )
         except Empty:
             pass
@@ -212,6 +214,7 @@ class RadioPlayer():
         FICDecoder: SId 0xC4CD: audio service (SubChId 17, DAB+, primary)
         EnsemblePlayer: playing sub-channel 4 (DAB+)
         FICDecoder: SId 0xC4CD: programme type (static): 'Rock Music'
+        FICDecoder: SId 0xC229: programme type (static): 'Pop Music'
         FICDecoder: SId 0xC4CD, SCIdS  0: MSC service component (SubChId 17)
         FICDecoder: SId 0xC4CD: programme service label 'Radio X' ('Radio X')
         PADChangeDynamicLabel SId 0xC4CD Label:'Radio X - Get Into the Music'
@@ -225,8 +228,8 @@ class RadioPlayer():
         # pumps out errors
         # TODO: eti_cmdline.... errors confuse log parsing
         self.dablin_stderr_lookups = {
-            "dab_type":  re.compile(f"^FICDecoder: SId {self.sid}: audio service \(SubChId\s+\d+, (?P<v>.*), primary\)", re.IGNORECASE),
-            "prog_type": re.compile(f"^FICDecoder: SId {self.sid}: programme type \(static\): '(?P<v>.*)'", re.IGNORECASE),
+            "dab_type":  re.compile(f"^.*FICDecoder: SId {self.sid}: audio service \(SubChId\s+\d+, (?P<v>.*), primary\)", re.IGNORECASE),
+            "prog_type": re.compile(f"^.*FICDecoder: SId {self.sid}: programme type \(static\): '(?P<v>.+)'", re.IGNORECASE),
             # "pad_label": re.compile(f"PADChangeDynamicLabel SId {self.sid} Label:'(?P<v>.+)'", re.IGNORECASE),
             "pad_label": re.compile(f"DABlinText: PADChangeDynamicLabel Label: '(?P<v>.+)'", re.IGNORECASE),
             "dl+label":  re.compile(f"DABlinText: PADChangeDynamicLabel DLPlusType: .+ DLPlusText: '(?P<v>.+)'", re.IGNORECASE),
@@ -298,13 +301,24 @@ class RadioPlayer():
         TODO: This could be fragile and what about non-uk?
         '''
         if Path("default-multiplexes.json"):
+            logger.info("Loading default block codes")
+            l=locale.getlocale()
+            country_iso=l[0].split("_",2)[1].lower()
+            logger.info("Local Machine Country: %s", country_iso)
             with open("default-multiplexes.json") as m:
                 s_json = json.load(m)
-                self.multiplexes = s_json["uk"]
+                #self.multiplexes = s_json["gb"]
+                core_mux    = set(s_json["core"])
+                if country_iso in s_json:
+                    country_mux = set(s_json[country_iso])
+                else:
+                    country_mux = []
+                self.multiplexes = sorted(list(core_mux | country_mux), reverse=True)
+                logger.info("Will use multiplexes: %s", ",".join(self.multiplexes))
         return self.multiplexes
 
     def scan(self, ui, ui_msg_callback=None):
-
+        logger.info("Starting scan")
         # Cant scan while RTLSDR is in use
         self.stop()
 
@@ -316,7 +330,7 @@ class RadioPlayer():
         # Get multiplex blocks
         self.load_multiplexes()
         for block in sorted(self.multiplexes):
-            print("Scanning", block)
+            logger.info("Scanning %s", block)
             if ui_msg_callback is not None:
                 ui_msg_callback(ui, f'Scanning {block}')
 
@@ -328,19 +342,24 @@ class RadioPlayer():
             )
             
             ensemble_file = Path(f'ensemble-ch-{block}.json')
+            logger.info("Reading ensemble file: %s", ensemble_file)
             if ensemble_file.exists():
                 with open(ensemble_file, 'r') as jfile:
                     data = json.load(jfile)
                     ui_msg_callback(ui, f"Found {len(data['stations'])} stations", sub_msg=data['ensemble'])
                     for s,sid in data['stations'].items():
+                        logger.info("Found %s (%s)", s, data['ensemble'])
                         if s not in stations:
                             stations[s]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }
                         else:
+                            # Duplicate?
                             stations[s + " " + data['ensemble'] ]={ 'sid':sid, 'ensemble':data['ensemble'], 'channel':data['channel'] }                  
             else:
                 ui_msg_callback(ui, f'No stations')    
 
-            time.sleep(1.5)
+            # Wait for eti to terminate
+            time.sleep(1.0)
+        # End for
 
         if ui_msg_callback is not None:
             ui_msg_callback(ui, f'Storing Data')
@@ -354,4 +373,6 @@ class RadioPlayer():
         if ui_msg_callback is not None:
             ui_msg_callback(ui, f'Found {self.radio_stations.total_stations} stations')
             time.sleep(1.5)
+
+        logger.info("Scanning complete")
     
