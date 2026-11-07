@@ -11,19 +11,21 @@ This project is targetted to be run on a Raspberry Pi running Raspberry Lite OS 
 - Station name scroll
 - Ensemble displayed and DAB type
 - Stream via Apple Airplay. Displays Album, Track and Artist
-- Graphic equaliser works in both Radio and Airplay modes
-- Right encoder changes Volume (using log scale) 
-- Left encoder changes the station
-- Station scanning works, although need to decide how to handle default list of channels to scan
-- Also captures audio format and genre but not currently displayed
+- Visual Graphic equaliser works in both Radio and Airplay modes
+- Visualiser uses CGT in bar mode which reflects music very well
+- Full visual equaliser uses FFT and MEL as theres a lot of data
+  Less responsive but far more efficient (and still pretty)
+- Right encoder changes Volume
+- Left encoder changes the Station
+- Station scanning works
+- Captures audio format and genre (not currently displayed)
 - Can be themed but functionality not exposed yet
-- Power button to power radio off
+- Power button to power radio off and on
   
 ## Current status and missing features
-- It works!!
 - Some interface issues when selecting stations
-- FFT works, but frequency selection needs some work 
 - No way to select country/default ensembles to scan
+- Default multiplexes *should* cover global multiplexes
 - Themes are implemented but no way to select/update them
 - Need to run automatically at boot
 - Support for Google Cast audio streaming looks like it may not be possible as this relies
