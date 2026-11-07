@@ -13,7 +13,7 @@ import numpy as np
 import threading
 from copy import copy,deepcopy
 from enum import Enum,StrEnum
-from scipy.signal import butter, filtfilt, lfilter
+from scipy.signal import butter, filtfilt, lfilter, savgol_filter
 
 logger = logging.getLogger(__name__)
 
@@ -151,10 +151,16 @@ class AudioProcessing():
         self._lock = threading.Lock()
 
         # Set Freq min/max. Max human hearing is around 20-20000
-        # Music is a lot less. 30-15000 seems to work well
-        # but can be tweaked
-        self.mel_filter_fmin:int = 40
-        self.mel_filter_fmax:int = 15000
+        # Music is a lot less. For Mel/FFT 100-10000Hz seems to work well
+        self.mel_filter_fmin:int = 100
+        self.mel_filter_fmax:int = 10000
+        # CQT freq range is less, defaults to 65-987Hz
+        self.cqt_freq_range      = []
+        self.cqt_fmin            = librosa.note_to_hz('C2')
+        # C1 =~ 32.7Hz, C2 =~ 65.41Hz, C3, =~ 131Hz, C4 =~ 262Hz
+        self.cqt_bins_per_octave = 12 
+        self.cqt_octaves         = 4 # above fmin eg C2 = 65Hz to 987Hz
+        self.cqt_hop_len         = 512
 
         # Create a mel filterbank (set when first used)
         self.mel_filterbank = None
@@ -166,6 +172,7 @@ class AudioProcessing():
         self._last_mel_fmin:int = self.mel_filter_fmin
         self._last_mel_fmax:int = self.mel_filter_fmax
 
+
     def update(self, prop, value):
         '''
         Thread safe way to update properties e.g. ao.update("mel_filter_fmin",60)
@@ -173,6 +180,7 @@ class AudioProcessing():
         with self._lock: 
             setattr(self, prop, value)
         return value
+
 
     def signal(self) -> np.ndarray:
         '''
@@ -184,12 +192,14 @@ class AudioProcessing():
             s=self._signal.copy()
         return s
 
+
     def zero_signal(self):
         '''
         Set the signal buffer to zero
         '''
         with self._lock:
             self._signal = np.zeros(4096)
+
 
     def magnitude_to_db(self,magnitude:int|float, reference:float=1.0) -> int:
         '''
@@ -198,18 +208,21 @@ class AudioProcessing():
         '''
         return int(20 * log10(magnitude/reference))
 
+
     def vol_up(self, inc:int=2) -> int:
         with self._lock:
             v = min(self.volume() + inc, self.max_volume)
             self.set_volume(v)
         return v
 
+
     def vol_down(self, inc:int=2) -> int:
         with self._lock:
             v = max(self.volume() - inc, self.min_volume)
             self.set_volume(v)
         return v
-   
+
+
     def volume(self, db:bool=False) -> int:
         '''
         Return current ALSA playback volume as a % or as DB (-ve)
@@ -218,6 +231,7 @@ class AudioProcessing():
                 if db \
                 else \
                 self.mixer.getvolume(pcmtype=alsaaudio.PCM_PLAYBACK, units=alsaaudio.VOLUME_UNITS_PERCENTAGE)[0]
+
 
     def set_volume(self, vol:int=20, units:int=alsaaudio.VOLUME_UNITS_PERCENTAGE) -> int:
         '''
@@ -240,6 +254,7 @@ class AudioProcessing():
         logger.debug(f'Setting volume to {v} {self.volume(db=True)}db')
         return v
 
+
     def sound_data_avail_callback(self, in_data, frame_count, time_info, status):
         with self._lock:
             # Calc number of frames, based on bit size
@@ -261,6 +276,7 @@ class AudioProcessing():
             logger.debug("Req buffer len:%d in_data len: %d, frame count:%d n:%d", self.frames_chunk_size, len(in_data), frame_count, n)
         return (None, pyaudio.paContinue)
 
+
     def start(self):
         '''
         Start audio recording so we can get waveform etc
@@ -275,11 +291,13 @@ class AudioProcessing():
                         rate=self.sample_rate,
                         input_device_index=self.record_dev_index,
                         input=True,
-                        start=False, # Need to wait for dablin to catch up
+                        start=False, # Need to wait for dablin/eti to start decoding
                         frames_per_buffer=self.frames_chunk_size,
-                        stream_callback = lambda in_data, frame_count, time_info, status:self.sound_data_avail_callback(in_data,frame_count,time_info,status)
+                        stream_callback = 
+                            lambda in_data, frame_count, time_info, status:self.sound_data_avail_callback(in_data,frame_count,time_info,status)
         )
         return self.stream
+
 
     def fft(self, signal, 
             is_mono:bool=False, 
@@ -361,7 +379,51 @@ class AudioProcessing():
         # Get magnitudes for the freqs from the mel filterbank
         # Square the FFT to convert amplitude to power/energy
         # which has physical meaning.
-        #mel_mags = self.mel_filterbank @ (fft ** 2)
-        mel_mags = self.mel_filterbank @ S_power
+        # mel_mags = self.mel_filterbank @ (fft ** 2)
+        mags = self.mel_filterbank @ S_power
+        return (fft, mags)
 
-        return (fft, mel_mags)
+
+    def cqt(self, signal, 
+            is_mono:bool=False, 
+            bin_size:int=40,
+            N:int=512):
+    
+        # Convert to mono, unless already mono i.e. 1 channel in
+        mono_signal = signal if is_mono or self.rec_channels==1 else (signal[0::2] + signal[1::2] ) / 2
+
+        # Size/len of mono signal
+        mono_signal_size = len(mono_signal)
+
+        # Window to reduce spectral oddities
+        mono_signal = mono_signal * np.hanning(mono_signal_size)
+
+        # Set the CQT params
+        n_bins          = self.cqt_bins_per_octave * self.cqt_octaves
+        group_size      = n_bins // bin_size
+
+        if self.cqt_freq_range is None or bin_size != self._last_bars:
+            self.cqt_freq_range = librosa.cqt_frequencies(n_bins, fmin=self.cqt_fmin, bins_per_octave=self.cqt_bins_per_octave)
+            logger.info(f"CQT Freq Range: {self.cqt_freq_range[0]:.1f} Hz → {self.cqt_freq_range[-1]:.1f} Hz")
+            self._last_bars = bin_size
+
+        C = np.abs(librosa.cqt(mono_signal, sr=self.sample_rate, 
+                   hop_length=self.cqt_hop_len,
+                   n_bins=n_bins, 
+                   bins_per_octave=self.cqt_bins_per_octave,
+                   fmin=self.cqt_fmin,
+                   filter_scale=0.5 ))
+
+        # Convert to db so amplitude doesnt smash the max
+        C_db  = librosa.amplitude_to_db(C, ref=np.max)
+        # Convert to linear gain
+        C_lin = 10 ** (C_db / 10)
+
+        # Simple mean-pooling
+        #mags = np.abs(C_db[:group_size * bin_size].reshape(bin_size, group_size, -1).mean(axis=1)[:, -1])
+        #mags = np.abs(C[:group_size * bin_size].reshape(bin_size, group_size, -1).mean(axis=1)[:, -1])
+        if C_lin.any():
+            mags = np.abs(C_lin[:group_size * bin_size].reshape(bin_size, group_size, -1).mean(axis=1)[:, -1])
+        else:
+            mags = np.zero(group_size * bin_size)
+        return (None, mags)

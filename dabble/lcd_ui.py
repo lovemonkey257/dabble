@@ -137,8 +137,9 @@ class UIState():
     fps:int                        = 0 # Frames Per Sec
     render_time:int                = 0 # Time (in ms) taken to render LCD display
 
-    gamma:float                    = 0.3 # How energetic is viz, lower better
-    num_bars:int                   = 32
+    gamma:float                    = 0.9  # How energetic is viz, lower faster
+    num_bars:int                   = 32   # 32 freq bars
+    fall_decay:float               = 0.85 # How quickly peaks decay
 
     shairport_dbus_interface:dbus.Interface  = None                          
 
@@ -305,13 +306,13 @@ class LCDUI():
         self.status_size_x       = 0
         self._pause_status_timer = Timer()
 
-        # Levels
+        # Historical peak values
         self.last_l_level     = 0
         self.last_r_level     = 0
         self.last_max_l_level = 0
         self.last_max_r_level = 0
-        self.last_max_signal  = np.zeros(4096)
         self.max_mag          = 1
+        self.last_max_signal  = np.zeros(4096)
     
         # This will also set a default theme just in case
         # any requested theme is broken/not there
@@ -328,19 +329,24 @@ class LCDUI():
         # Event object to end animation loop
         self._end_display_loop = Event()
 
+
     def start_lcd_display_loop(self):
         '''
-        Start the display loop
+        Start the display render thread
         '''
         logging.info("Starting LCD Display loop..")
         self._animation_thread=Thread(target=self._display_loop)
         self._animation_thread.start()
 
+
     def _display_loop(self):
-        # Render loop
+        '''
+        Render loop
+        '''
         logging.info("LCD Render starts")
         while True:
             if self._end_display_loop.is_set():
+                # Exit nicely if requested
                 break
             # Stop animations when scanning...
             if not self.state.radio_state.scanning_for_stations.is_active:
@@ -350,6 +356,8 @@ class LCDUI():
             #       taken up decoding DAB ETI frames?
             #time.sleep(0.005)
         # End While
+        logging.info("LCD Render stopped")
+
 
     def stop_lcd_display_loop(self):
         '''
@@ -358,6 +366,7 @@ class LCDUI():
         self._end_display_loop.set()
         self._animation_thread.join()
 
+
     def get_font_path(self, style):
         '''
         Get the Font path based on the style we want e.g. bold
@@ -365,6 +374,7 @@ class LCDUI():
         fp=str(self.font_dir  / f'{self.base_font}-{style}.ttf')
         logging.info("Font path: %s", fp)
         return fp
+
 
     def init_fonts(self):
         '''
@@ -572,6 +582,9 @@ class LCDUI():
 
 
     def show_startup(self):
+        '''
+        Show start up screen
+        '''
         self.clear_screen()
         self.draw_station_name("Dabble Radio")
         self.draw_ensemble("(c) digital-gangsters 2026")
@@ -712,6 +725,8 @@ class LCDUI():
         x=0
         anchor="lt"
         menu_list=[]
+
+        # Display menu depending on encoder clicked
         if self.state.radio_state.left_menu_activated.is_active or \
            self.state.radio_state.selecting_left_menu.is_active:
             anchor="lm" # lm
@@ -731,8 +746,12 @@ class LCDUI():
             next_menu = menu_list[i+1].dstate() if i<len(menu_list)-1 else menu_list[0].dstate()
 
             draw.line((0, 0, 0, self.HEIGHT), width=1, fill=self.state.theme.volume_bg)
+            # Prev menu item (small)
             draw.text( (x, self.CENTRE_HEIGHT-cm_height), prev_menu, font=self.menu_sml_font, fill=self.state.theme.menu_sml, anchor=anchor)
+            # Currently selected item (larger)
             draw.text( (x, self.CENTRE_HEIGHT), display_text, font=self.menu_sel_font, fill=self.state.theme.menu, anchor=anchor)
+            # Next menu item (small)
+            #draw.text( (x, self.CENTRE_HEIGHT-cm_height), prev_menu, font=self.menu_sml_font, fill=self.state.theme.menu_sml, anchor=anchor)
             draw.text( (x, self.CENTRE_HEIGHT+cm_height), next_menu, font=self.menu_sml_font, fill=self.state.theme.menu_sml, anchor=anchor)
        
 
@@ -823,24 +842,25 @@ class LCDUI():
     def graphic_equaliser(self, 
                           signal, 
                           base_y:int=0, height:int=60, width:int=0, 
-                          fall_decay:float=0.8, 
                           is_mono:bool=False):
         '''
-        Show all frequencies (max being the width of the screen) using fft
+        Show all frequencies (max being the width of the screen) using fft and
+        a mel filter. This gives a more human-like freq response but bass is
+        squashed as mel is linear not log.  Cannot do cqt as not performant 
+        enough at 160(width) bars.
         '''
         if signal is None:
             return
-
         if width==0:
             width=self.WIDTH
 
-        (fft, mel) = self.state.audio_processor.fft(signal, mel_size=width, is_mono=is_mono)
+        (fft, mags) = self.state.audio_processor.fft(signal, mel_size=width, is_mono=is_mono)
 
         # Scale and emphasise.
         # abs values to remove negative value.
         # Also gamma of 0.5 is optimised as sqrt which will error on -ve mags.
-        mel_scaled = mel ** self.state.gamma
-        scale  = height/(np.max(mel_scaled) + 0.001)
+        mags_scaled = mags ** self.state.gamma
+        scale  = height/(np.max(mags_scaled) + 0.001)
 
         # Clear existing graphics
         self.draw.rectangle([
@@ -848,7 +868,7 @@ class LCDUI():
             (self.WIDTH,self.HEIGHT-base_y)], fill="black")
 
         for x in range(0,self.WIDTH,1):
-            y = int(mel_scaled[x] * scale)
+            y = int(mags_scaled[x] * scale)
             if y > height:
                 y = height
             if y > self.last_max_signal[x]:
@@ -862,32 +882,31 @@ class LCDUI():
                 self.draw.point(
                         (x , self.HEIGHT - self.last_max_signal[x] - base_y),
                         fill=self.state.theme.viz_dot)
-                self.last_max_signal[x] *= fall_decay
+                self.last_max_signal[x] *= self.state.fall_decay
 
 
     def graphic_equaliser_bars(self, 
                                signal, 
                                base_y:int=0, height:int=60, width:int=0, 
-                               fall_decay:float=0.8, 
                                num_bars:int=32, 
                                is_mono:bool=False):
         '''
-        Show frequencies using fft, grouped into num_bars (default 32) bins.
-        Uses librosa to create a mel filter to break FFT down into freq ranges
-        and display those rather than raw freq magnitudes direct from the FFT
+        Show frequencies using cgt, grouped into num_bars (default 32) bins.
+        This gives a log scale freq response so bass/lower freqs are not
+        squashed which is what mel will do.
         '''
         if signal is None:
             return
         if width == 0:
             width = self.WIDTH
 
-        (fft, mel) = self.state.audio_processor.fft(signal, mel_size=num_bars, is_mono=is_mono)
+        (fft, mags) = self.state.audio_processor.cqt(signal, bin_size=num_bars, is_mono=is_mono)
 
         # Scale and emphasise.
         # abs values to remove negative value.
         # Also gamma of 0.5 is optimised as sqrt which will error on -ve mags.
-        mel_scaled = mel ** self.state.gamma
-        scale  = height/(np.max(mel_scaled) + 0.001)
+        mags_scaled = mags ** self.state.gamma
+        scale  = height/(np.max(mags_scaled) + 0.001)
         
         # Clear area
         self.draw.rectangle([
@@ -897,9 +916,9 @@ class LCDUI():
 
         bar_width = width // num_bars
         for x in range(0,num_bars):
-            if x > len(mel_scaled)-1:
+            if x > len(mags_scaled)-1:
                 continue
-            bar_height = int(mel_scaled[x] * scale)
+            bar_height = int(mags_scaled[x] * scale)
             if bar_height>height:
                 bar_height=height
             x1 = x * bar_width
@@ -909,7 +928,9 @@ class LCDUI():
                 self.last_max_signal[x] = bar_height
 
             if self.last_max_signal[x]>0:
-                c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+self.last_max_signal[x]/100)) 
+                #c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+self.last_max_signal[x]/100)) 
+                #c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.08+self.last_max_signal[x]/100)) 
+                c=self.state.theme.viz_line
                 self.draw.rectangle([
                     (x1, self.HEIGHT - base_y - self.last_max_signal[x]-1), 
                     (x2, self.HEIGHT - base_y)], 
@@ -918,10 +939,17 @@ class LCDUI():
                     (x1, self.HEIGHT - base_y - self.last_max_signal[x]), 
                     (x2, self.HEIGHT - base_y - self.last_max_signal[x])], 
                     fill=self.state.theme.viz_dot, width=1)
-                self.last_max_signal[x] *= fall_decay
+                self.last_max_signal[x] *= self.state.fall_decay
+                '''
+                if x>10:
+                    self.last_max_signal[x] *= self.state.fall_decay
+                else:
+                    self.last_max_signal[x] *= self.state.fall_decay - 1-x/num_bars
+                '''
             else:
                 # Draw the bar (rectangle)
-                c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+bar_height/100)) if bar_height>0 else self.state.theme.viz_line
+                #c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.08+bar_height/100)) if bar_height>0 else self.state.theme.viz_line
+                c=self.state.theme.viz_line
                 self.draw.rectangle([
                     (x1, self.HEIGHT - base_y - bar_height - 1), 
                     (x2, self.HEIGHT - base_y)], 
