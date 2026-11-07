@@ -282,17 +282,24 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
                 logger.info("Updating %s to %s", cmd, payload)
                 f=int(payload)
                 if f<20 or f>20000:
-                    f=20
+                    f=20000
                 audio_processor.update("mel_filter_fmax", f)
             case "gfxbars":
                 logger.info("Updating %s to %s", cmd, payload)
                 b=int(payload)
-                if b<0 or b>64:
+                if b<8 or b>64:
                     b=64
                 ui.state.update("num_bars", b)
             case "gamma":
                 logger.info("Updating %s to %s", cmd, payload)
                 ui.state.update("gamma", float(payload))
+            case "fall_decay":
+                logger.info("Updating %s to %s", cmd, payload)
+                d=float(payload)
+                if d<0 or d>1:
+                    d=0.5
+                ui.state.update("fall_decay", d)
+
             case "shutdown":
                 logger.info("Updating PAD to reflect %s name %s", cmd, payload)
                 ui.state.update_pad(payload, priority=True)
