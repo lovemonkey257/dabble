@@ -247,6 +247,27 @@ def on_connect(client, userdata, flags, reason_code, properties):
     # reconnect then subscriptions will be renewed.
     client.subscribe("dabble-radio/#")
 
+
+def _convert_to_type(payload, t):
+    '''
+    Given a type and raw string return it as a valid type
+    or None if cannot be converted
+    '''
+    try:
+        if t is float: 
+            return float(payload)
+        elif t is int:
+            return int(payload)
+        elif t is bool:
+            if payload == "1" or payload == "0":
+                return payload == "1"
+        else:
+            return None
+    except ValueError:
+        logger.error("Ignoring. Cannot convert %s to %s", payload, t)
+        return None
+
+
 @change_thread_name
 def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None):
     '''
@@ -266,51 +287,68 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
     base_topic = topic_components[0]
     cmd        = topic_components[1]
     payload    = msg.payload.decode("utf-8")
-    if payload == "1" or payload == "0":
-        # Convert payload to boolean
-        payload = payload == "1"
+
+    # Check if oversized and truncate
+    if len(payload)>256:
+        payload=payload[:256]
 
     if base_topic=="dabble-radio":
         match cmd:
+            case "cqtfmin":
+                f=_convert_to_type(payload, int)
+                if f is not None:
+                    if f>=20 and f<=20000:
+                        audio_processor.update("cqt_fmin", f)
+            case "cqtoctaves":
+                f=_convert_to_type(payload, int)
+                if f is not None:
+                    if f>=3 and f<=6:
+                        audio_processor.update("cqt_octaves", f)
             case "melfmin":
-                logger.info("Updating %s to %s", cmd, payload)
-                f=int(payload)
-                if f<20 or f>20000:
-                    f=20
-                audio_processor.update("mel_filter_fmin", f)
+                f=_convert_to_type(payload, int)
+                if f is not None:
+                    if f>=20 and f<=20000 and f<audio_processor.mel_filter_fmax:
+                        audio_processor.update("mel_filter_fmin", f)
+
             case "melfmax":
-                logger.info("Updating %s to %s", cmd, payload)
-                f=int(payload)
-                if f<20 or f>20000:
-                    f=20000
-                audio_processor.update("mel_filter_fmax", f)
+                f=_convert_to_type(payload, int)
+                if f is not None:
+                    if f>=20 and f<=20000 and f>audio_processor.mel_filter_fmin:
+                        audio_processor.update("mel_filter_fmax", f)
+
             case "gfxbars":
-                logger.info("Updating %s to %s", cmd, payload)
-                b=int(payload)
-                if b<8 or b>64:
-                    b=64
-                ui.state.update("num_bars", b)
+                b=_convert_to_type(payload, int)
+                if b is not None:
+                    if b>=8 and b<=40:
+                        ui.state.update("num_bars", b)
+
             case "gamma":
-                logger.info("Updating %s to %s", cmd, payload)
-                ui.state.update("gamma", float(payload))
+                g=_convert_to_type(payload, float)
+                if g is not None:
+                    if g>=0.1 and g<=1:
+                        ui.state.update("gamma", g)
+
             case "fall_decay":
-                logger.info("Updating %s to %s", cmd, payload)
-                d=float(payload)
-                if d<0 or d>1:
-                    d=0.5
-                ui.state.update("fall_decay", d)
+                d=_convert_to_type(payload, float)
+                if d is not None:
+                    if d>0.0 and d<=1.0:
+                        ui.state.update("fall_decay", d)
 
             case "shutdown":
                 logger.info("Updating PAD to reflect %s name %s", cmd, payload)
                 ui.state.update_pad(payload, priority=True)
+
             case "client_name":
                 ui.state.client_name = payload
                 logger.info("Inbound Airplay connection from: %s", ui.state.client_name)
+
             case "playing" | "play_resume":
-                logger.info("Airplay playing: %s", "yes" if payload else "no")
-                if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY:
-                    logger.info("Airplay already playing or being pausing. Ignore")
-                ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
+                if (playing := _convert_to_type(payload,bool)) is not None:
+                    logger.info("Airplay playing: %s", "yes" if playing else "no")
+                    if ui.state.radio_state.mode == menus.PlayerMode.AIRPLAY:
+                        logger.info("Airplay already playing or being pausing. Ignore")
+                    ui.state.radio_state.mode = menus.PlayerMode.AIRPLAY
+
             case "active_start":
                 logger.info("Airplay activated, Radio should shutdown")
                 ui.state.radio_state.update("mode",menus.PlayerMode.AIRPLAY)
@@ -318,6 +356,7 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
                 ui.state.last_station_name = ui.state.station_name 
                 if player:
                     player.stop()
+
             case "active_end":
                 logger.info("Airplay deactivated, Radio should start up again. Station: %s", ui.state.last_station_name)
                 ui.state.radio_state.update("mode",menus.PlayerMode.RADIO)
@@ -325,27 +364,33 @@ def on_message(client, userdata, msg, ui=None, audio_processor=None, player=None
                 if player:
                     player.play(ui.state.station_name)
                 ui.state.ensemble = player.ensemble
+
             case "album":
                 logger.info("Airplay %s: %s", cmd, payload)
                 ui.state.album = payload
+
             case "track" | "title":
                 logger.info("Airplay %s: %s", cmd, payload)
                 ui.state.track = payload
                 logger.info("Updating PAD to reflect %s name %s", cmd, ui.state.track)
                 ui.state.update_pad(ui.state.track)
+
             case "artist":
                 logger.info("Airplay %s: %s", cmd, payload)
                 ui.state.artist = payload
                 ui.state.station_name = ui.state.artist
+
             case "genre":
                 logger.info("Airplay %s: %s", cmd, payload)
                 ui.state.genre = payload
+
             case "volume":
                 vol_db_str,_=payload.split(",",1) 
                 vol_db = float(vol_db_str)  # Apple gives negative DB (real)
                 audio_processor.set_volume(vol_db, units=alsaaudio.VOLUME_UNITS_DB)
                 ui.state.update("volume",audio_processor.volume())
                 logger.info("Vol DB:%f. Current volume: %d", vol_db, ui.state.volume)
+
             case _:
                 logger.info("Unhandled MQTT Topic:%s - %s", msg.topic, payload)
     else:
