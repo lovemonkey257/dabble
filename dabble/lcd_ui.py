@@ -604,22 +604,22 @@ class LCDUI():
         '''
         nl,nr=(0,0)
         if l>0:
-            nl=int(l/100000)
+            nl=int(l*(self.CENTRE_WIDTH/self.state.audio_processor.last_max_l_level))
         if r>0:
-            nr=int(r/100000)
+            nr=int(r*(self.CENTRE_WIDTH/self.state.audio_processor.last_max_r_level))
 
-        centre=self.WIDTH/2
+        centre=self.CENTRE_WIDTH
         lx1, rx1=(centre-nl-1, centre+nr+1)
-        l_line_colour_rgb = self.state.theme.viz_dot if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(l/10, 0.8, 0.9))
-        r_line_colour_rgb = self.state.theme.viz_dot if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(r/10, 0.8, 0.9))
+        l_line_colour_rgb = self.state.theme.viz_line if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(l/10, 0.8, 0.9))
+        r_line_colour_rgb = self.state.theme.viz_line if not rainbow else tuple(int(c*255) for c in colorsys.hsv_to_rgb(r/10, 0.8, 0.9))
         self.clear_levels(y=y)
 
         # Draw levels
-        self.draw.line((c,y,lx1,y),fill=l_line_colour_rgb, width=1)
-        self.draw.line((c,y,rx1,y),fill=r_line_colour_rgb, width=1)
+        self.draw.line((centre,y,lx1,y),fill=l_line_colour_rgb, width=1)
+        self.draw.line((centre,y,rx1,y),fill=r_line_colour_rgb, width=1)
 
         # Draw centre point
-        self.draw.point((c,y),fill=self.state.theme.viz_line)
+        self.draw.point((centre,y),fill=self.state.theme.viz_line)
 
         # Calc max
         if nl>self.last_max_l_level:
@@ -629,11 +629,11 @@ class LCDUI():
 
         # Draw peaks with decay
         if self.last_max_l_level>0:
-            self.draw.point((c-self.last_max_l_level,y),fill=self.state.theme.viz_dot)
-            self.last_max_l_level -= decay
+            self.draw.point((centre-self.last_max_l_level,y),fill=self.state.theme.viz_dot)
+            self.last_max_l_level *= self.state.fall_decay
         if self.last_max_r_level>0:
-            self.draw.point((c+self.last_max_r_level,y),fill=self.state.theme.viz_dot)
-            self.last_max_r_level -= decay
+            self.draw.point((centre+self.last_max_r_level,y),fill=self.state.theme.viz_dot)
+            self.last_max_r_level *= self.state.fall_decay
 
 
     def draw_mode_old(self, clear:bool=True):

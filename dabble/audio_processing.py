@@ -124,6 +124,8 @@ class AudioProcessing():
         # Store l/r peak values
         self.peak_l:int  = 0
         self.peak_r:int  = 0
+        self.last_max_l_level:int = 0
+        self.last_max_r_level:int = 0
 
         # Volume is the % value
         # We assume joined volume which is the natual way to change vol
@@ -276,6 +278,11 @@ class AudioProcessing():
                 # Mono
                 self.peak_l  = int(np.abs(np.max(self._signal))/self._max_value*100.0)
                 self.peak_r  = self.peak_l
+
+            if self.peak_l>self.last_max_l_level:
+                self.last_max_l_level=self.peak_l
+            if self.peak_r>self.last_max_r_level:
+                self.last_max_r_level=self.peak_r
 
             logger.debug("Req buffer len:%d in_data len: %d, frame count:%d n:%d", self.frames_chunk_size, len(in_data), frame_count, n)
         return (None, pyaudio.paContinue)
