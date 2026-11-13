@@ -154,13 +154,14 @@ class AudioProcessing():
         # Music is a lot less. For Mel/FFT 100-10000Hz seems to work well
         self.mel_filter_fmin:int = 100
         self.mel_filter_fmax:int = 10000
-        # CQT freq range is less, defaults to 65-987Hz
-        self.cqt_freq_range      = []
-        self.cqt_fmin            = librosa.note_to_hz('C2')
+        # CQT freq range is less
+        self.cqt_freq_range      = [] # Calculated later on
+        self.cqt_fmin            = librosa.note_to_hz('C3')
         # C1 =~ 32.7Hz, C2 =~ 65.41Hz, C3, =~ 131Hz, C4 =~ 262Hz
         self.cqt_bins_per_octave = 12 
-        self.cqt_octaves         = 4 # above fmin eg C2 = 65Hz to 987Hz
-        self.cqt_hop_len         = 512
+        self.cqt_octaves         = 4 #4 # above fmin eg C2 = 65Hz to 987Hz
+        self.cqt_hop_len         = 256 # 512
+        self.cqt_filter_scale    = 0.4
 
         # Create a mel filterbank (set when first used)
         self.mel_filterbank = None
@@ -171,6 +172,9 @@ class AudioProcessing():
         self._last_bars:int = 0
         self._last_mel_fmin:int = self.mel_filter_fmin
         self._last_mel_fmax:int = self.mel_filter_fmax
+
+        self._last_cqt_fmin:int    = self.cqt_fmin
+        self._last_cqt_octaves:int = self.cqt_octaves
 
 
     def update(self, prop, value):
@@ -388,7 +392,20 @@ class AudioProcessing():
             is_mono:bool=False, 
             bin_size:int=40,
             N:int=512):
-    
+        '''
+        Use constant-Q transform (CQT) instead of raw FFT/MEL.
+        The advantage over direct FFT is the sound is decomposed into frequency
+        bins spaced geometrically (logarithmically) rather than linearly. As the
+        window length is variable we get better response at lower frequencies. FFT
+        and MEL are linear so lower freqs are compressed.
+
+        The downside is it requires more computation so we have to careful with
+        some parameters. We want a good representation of the music, we're not
+        doing some exact audio processing.
+
+        It looks pretty and far more responsive to the "sound" and "shape" of
+        the music.
+        '''
         # Convert to mono, unless already mono i.e. 1 channel in
         mono_signal = signal if is_mono or self.rec_channels==1 else (signal[0::2] + signal[1::2] ) / 2
 
@@ -402,17 +419,21 @@ class AudioProcessing():
         n_bins          = self.cqt_bins_per_octave * self.cqt_octaves
         group_size      = n_bins // bin_size
 
-        if self.cqt_freq_range is None or bin_size != self._last_bars:
+        if self.cqt_freq_range is None or bin_size != self._last_bars \
+                or self.cqt_octaves!=self._last_cqt_octaves \
+                or self.cqt_fmin!=self._last_cqt_fmin:
             self.cqt_freq_range = librosa.cqt_frequencies(n_bins, fmin=self.cqt_fmin, bins_per_octave=self.cqt_bins_per_octave)
-            logger.info(f"CQT Freq Range: {self.cqt_freq_range[0]:.1f} Hz → {self.cqt_freq_range[-1]:.1f} Hz")
+            logger.info(f"CQT Freq Range: {self.cqt_freq_range[0]:.1f} Hz → {self.cqt_freq_range[-1]:.1f} Hz, Octaves: {self.cqt_octaves}")
             self._last_bars = bin_size
+            self._last_cqt_octaves = self.cqt_octaves
+            self._last_cqt_fmin    = self.cqt_fmin
 
         C = np.abs(librosa.cqt(mono_signal, sr=self.sample_rate, 
                    hop_length=self.cqt_hop_len,
                    n_bins=n_bins, 
                    bins_per_octave=self.cqt_bins_per_octave,
                    fmin=self.cqt_fmin,
-                   filter_scale=0.5 ))
+                   filter_scale= self.cqt_filter_scale ))
 
         # Convert to db so amplitude doesnt smash the max
         C_db  = librosa.amplitude_to_db(C, ref=np.max)
