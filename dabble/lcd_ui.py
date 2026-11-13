@@ -869,12 +869,16 @@ class LCDUI():
 
         for x in range(0,self.WIDTH,1):
             y = int(mags_scaled[x] * scale)
+
             if y > height:
                 y = height
+
             if y > self.last_max_signal[x]:
                 self.last_max_signal[x] = y
+
             if self.last_max_signal[x]>0:
-                c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+self.last_max_signal[x]/100)) 
+                # c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+self.last_max_signal[x]/100)) 
+                c=self.state.theme.viz_line
                 self.draw.line ([
                     (x, self.HEIGHT - base_y), 
                     (x , self.HEIGHT - self.last_max_signal[x] - base_y)], 
@@ -927,10 +931,12 @@ class LCDUI():
             if bar_height > self.last_max_signal[x]:
                 self.last_max_signal[x] = bar_height
 
+            # TODO: This doesnt work very well.....
+            #c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+self.last_max_signal[x]/100)) 
+            #c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.3, self.last_max_signal[x]/120)) if bar_height>0 else self.state.theme.viz_line
+            c=self.state.theme.viz_line
+
             if self.last_max_signal[x]>0:
-                #c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.10+self.last_max_signal[x]/100)) 
-                #c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.08+self.last_max_signal[x]/100)) 
-                c=self.state.theme.viz_line
                 self.draw.rectangle([
                     (x1, self.HEIGHT - base_y - self.last_max_signal[x]-1), 
                     (x2, self.HEIGHT - base_y)], 
@@ -948,8 +954,6 @@ class LCDUI():
                 '''
             else:
                 # Draw the bar (rectangle)
-                #c=tuple(int(c*255) for c in colorsys.hsv_to_rgb(194/360, 0.86, 0.08+bar_height/100)) if bar_height>0 else self.state.theme.viz_line
-                c=self.state.theme.viz_line
                 self.draw.rectangle([
                     (x1, self.HEIGHT - base_y - bar_height - 1), 
                     (x2, self.HEIGHT - base_y)], 
