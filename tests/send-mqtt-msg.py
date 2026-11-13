@@ -1,7 +1,7 @@
 import paho.mqtt.publish as publish
 import argparse
 
-valid_cmds = ["gamma","gfxbars","shutdown","melfmin","melfmax","fall_decay"]
+valid_cmds = ["gamma","gfxbars","shutdown","melfmin","melfmax","fall_decay","cqtoctaves","cqtfmin"]
 
 parser = argparse.ArgumentParser(description="Send local MQTT msg")
 parser.add_argument("-c", "--channel",type=str, choices=valid_cmds, help="channel to send msg to")
