@@ -2,149 +2,69 @@
 
 ![alt text](docs/radio-interface-animation.gif)
 
-A DAB radio project based on a PI, RTLDSR, a small LCD and some LED encoders. The core software is based on the good work of dablin and eti-stuff and it is very much a work in progress.
+A DAB radio project based on a Raspberry Pi, RTL-SDR, a small LCD, and rotary encoders. The core software is based on the excellent work of `dablin` and `eti-stuff` and is currently a work in progress.
 
-This project is targetted to be run on a Raspberry Pi running Raspberry Lite OS (this could change). Assumptions reqarding packages etc rely on this. While the hardware could be run on another system using I2C and I2S I've not tested this.  
+This project is designed to run on **Raspberry Pi OS Lite**. While the hardware could potentially run on other systems using I2C and I2S, it has only been tested on the Pi.
 
-## Features
-- DAB and DAB+ reception
-- Station name scroll
-- Ensemble displayed and DAB type
-- Stream via Apple Airplay. Displays Album, Track and Artist
-- Visual Graphic equaliser works in both Radio and Airplay modes
-- Visualiser uses CGT in bar mode which reflects music very well
-- Full visual equaliser uses FFT and MEL as theres a lot of data
-  Less responsive but far more efficient (and still pretty)
-- Right encoder changes Volume
-- Left encoder changes the Station
-- Station scanning works
-- Captures audio format and genre (not currently displayed)
-- Can be themed but functionality not exposed yet
-- Power button to power radio off and on
-  
-## Current status and missing features
-- Some interface issues when selecting stations
-- No way to select country/default ensembles to scan
-- Default multiplexes *should* cover global multiplexes
-- Themes are implemented but no way to select/update them
-- Need to run automatically at boot
-- Support for Google Cast audio streaming looks like it may not be possible as this relies
-  on proprietary protocols and private crypto. Maybe use: https://github.com/rgerganov/shanocast
+## 🚀 Features
 
-# Running
-See instructions below on getting it built.
+- **DAB and DAB+ Reception**: High-quality digital radio.
+- **Dynamic Display**: Station name scrolling, ensemble details, and DAB type.
+- **AirPlay Integration**: Stream audio via Apple Airplay with Album, Track, and Artist display.
+- **Visualizations**:
+  - Graphic equalizer (works in both Radio and Airplay modes).
+  - CQT-based bar mode for music-responsive visualization.
+  - FFT and MEL-based full visual equalizer for efficient, high-density data display.
+- **Hardware Controls**:
+  - Left Encoder: Station selection and menu navigation.
+  - Right Encoder: Volume control and mode selection.
+- **Automatic Switching**: Automatically switches to AirPlay when a stream is detected and returns to Radio when the stream stops.
+- **Power Management**: Dedicated power button for on/off functionality.
 
-- cd into your dev dir
-- `./run-mqtt.sh`
-- `uv run radio.py`
+---
 
-The system will restart in whatever mode you left it in, but by default it will start
-in Radio mode.
+## 🛠 Hardware
 
-While in Radio mode if you airplay stream to this device it will automatically switch-over 
-and play whatever you stream. If you stop streaming, for example no music is selected, then 
-the device will automatically switch back to Radio.
+### Components
+- **Raspberry Pi 5** (Pi Zero 2 was tested but lacked sufficient power for visualizations).
+- **[Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout)**.
+- **2 x [Fermion EC11 encoders](https://thepihut.com/products/fermion-ec11-rotary-encoder-module-breakout)**.
+- **NESDR Nano 2+** (or any compatible RTL-SDR).
+- **USB Sound Card** (Tecknet or similar).
+- **Aerial**: 1m, 7-section with BNC connector + BNC Female to MCX Male Lowloss Pigtail (24cm).
 
-However, if you manually switch to Airplay mode the device will stay in that mode until you manually
-switch back to Radio mode.
+### Build & Wiring
+- **Wiring**: See the [GPIO PIN layout](docs/pin_usage.md).
+- **Enclosure**: TBD.
 
-## Display
-The top line displays the mode, either Radio or Airplay.
+---
 
-The middle contains four features:
-- Station Name alternating with the latest PAD message
-- Visualiser in the background
-- Volume bar below the visualiser
+## 🏃 Quick Start (Running)
 
-The bottom line is the ensemble and DAB type (standard DAB or DAB+)
+If the system is already built and configured:
 
-While streaming the display adapts as follows:
-- Mode switches to Airplay
-- Station Name/PAD are replaced with Track and Artist
-- Ensemble and DAB type are replaced by Album Name
+1. Enter your development directory.
+2. Start the MQTT broker: `./run-mqtt.sh`
+3. Run the radio application: `uv run radio.py`
 
-Volume changes on your source device, say you phone, will be reflected by the radio player.
+The system will start in the last used mode (default is Radio mode).
 
-## Left Encoder
-By default will select a station. Currently once a station is selected it will be used if left
-for 4 seconds. This feels more intuitive than then having to press the button to select.
+---
 
-Press the button to bring up the menu which allows you to change a number of dispay settings
-such as Equaliser type, Station on/off, Levels on/off.
+## 🏗 Installation & Setup
 
-## Right Encoder
-By default will change the volume. This is based on a log scale which feels better than
-linear.
+### 1. Base OS & Configuration
+Install **Raspberry Pi OS Lite** (minimal install, no GUI).
 
-Press the button to bring up the menu to allowing you to change the mode or initiate a scan. 
-
-## Menus in detail
-### Left Encoder
-Default - Volume
-On click:
-- List of Visualisations:
-    - Graphic Equaliser
-    - Waveform
-    - Bar Graphic Equaliser
-    - Levels On/Off
-    - Visualiser On/Off
-    - Station name On/Off
-
-- Select and click (if off will enable it)
-- If nothing selected revert to play screen after five seconds
-
-### Right Encoder
-Default - Station select. No button needed to select. Leave on a station for 3 seconds and
-          it will be selected automatically
-On click:
-- Menu options displayed:
-    - Radio Mode
-    - Airplay Mode
-    - Scan
-    - Standby Mode
-- If nothing selected for more than 5 secs revert to play screen
-
-# Build
-
-## Components
-- Raspberry Pi 5. I tried the Pi Zero 2 but it doesn't have enough processing power if visualisations are used.
-- [Pimoroni 0.96" LCD](https://shop.pimoroni.com/products/0-96-spi-colour-lcd-160x80-breakout). I got mine from PiHut.
-- 2 x [Fermion EC11 encoders](https://thepihut.com/products/fermion-ec11-rotary-encoder-module-breakout). These work well and I'm using these instead of the pretty one.
-- NESDR Nano 2+ (but any RTLSDR should do)
-- Tecknet USB sound card. Cheap, functional and sounds "good enough". This isn't a audiophile project.
-- Gave up on the Adafruit Speaker Bonnet and now using a USB sound card which is much more reliable. The drivers etc have been updated so may go back to this.
-- Aerial, 1m, 7 section with BNC connector
-- BNC Female to MCX Male Lowloss Pigtail, 24cm
-- No idea about an enclosure yet. I'm rubbish at this....
-
-## Hardware Build
-TBD
-
-### Wiring for each device
-See [GPIO PIN layout](docs/pin_usage.md)
-
-## Base OS
-Install Raspberry Pi Lite, no GUI needed, minimal install.
-
-## Software
-- UI and controller written in python
-- Modified version of of eti-cmdline from JvanKatwijk to enable scans. Forked here https://github.com/lovemonkey257/eti-stuff. Now accepted upstream so you can use eti-cmdline directly
-- Modified version of dablin from Opendigialradio so I can get PAD messages in cli version, https://github.com/lovemonkey257/dablin. PR accepted but not yet merged.
-- Shairplay-sync, built from souce. Will try to move back to podman
-- Have to use pulse so audiocard can be shared
-
-## Software Builds
-Building custom `dablin` needs thought as the build dependencies
-add unnecessary bloat. 
-
-### Base config
-Ensure Raspberry Pi has SPI and I2C enabled in config. i2s-mmap makes sound
-more efficient. Also turn off internal Audio (snd_bcm2935) so bonnet, if being
-used, is primary output. USB works by default.
-
-`/boot/firmware/config.txt` 
-
+**Enable SPI and I2C:**
+```bash
+sudo raspi-config nonint do_spi 1
+sudo raspi-config nonint do_i2c 1
 ```
+
+**Update `/boot/firmware/config.txt`:**
+Add the following to enable necessary interfaces and the power button:
+```text
 dtparam=i2c_arm=on
 dtparam=i2s=on
 dtparam=spi=on
@@ -159,203 +79,149 @@ dtoverlay=gpio-shutdown,debounce=500
 dtoverlay=gpio-led,gpio=3,label=pwrled,trigger=default-on,active_low=0 
 ```
 
-```
-sudo raspi-config nonint do_spi 1
-sudo raspi-config nonint do_i2c 1
-```
-
-* If using lite no GUI is installed so ensure pipewire-pulse installed:*
-```
+**Audio Setup:**
+Ensure `pipewire-pulse` is installed for audio sharing:
+```bash
 sudo apt install -y pipewire-pulse pulseaudio-utils
 sudo reboot
 ```
 
-### Build Essentials
-`sudo apt install build-essential cmake`
-
-### `dablin`
-Dependencies first.
-- `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libfdk-aac-dev`
-
-Now the code (assumes using my fork. Hopefully they may merge in my PR):
-- `sudo apt remove dablin`
-- `git clone https://github.com/lovemonkey257/dablin.git`
-- `cd dablin`
-- `mkdir build && cd build && cmake ..`
-- `make dablin && sudo cp src/dablin /usr/local/bin/`
-
-Note that dablin will be installed in /usr/local/bin/. System installed
-version is in /usr/bin. Check you've removed system version if you have
-problems with PAD.
-
-Also avoid `make install` as that will try to build GTK version. We only want the cli version
-so we mv it manually.
-
-### `eti-cmdline`
-This can be installed from Jvan's repo directly. The build is the same.
-
-Dependencies:
-- `sudo apt install libfftw3-dev libsndfile1-dev libsamplerate0-dev librtlsdr-dev libboost-dev jq`
-
-Code. Most changes have been accepted upstream (thanks Jvan) so this is probably redundent:
-- `git clone https://github.com/lovemonkey257/eti-stuff.git` or `git clone https://github.com/JvanKatwijk/eti-stuff.git`
-- `cd eti-stuff\eti-cmdline`
-- `mkdir build && cd build`
-- `cmake .. -DRTLSDR=ON`
-- `make && sudo make install`
-
-This should put `eti-cmdline-rtlsdr` into `/usr/local/bin`
-
-### Test Radio by Scanning
-
-- Ensure RTL device and audio are set up.
-- Test `eti-cmdline` can see USB RTL and dump some station params: `eti-cmdline-rtlsdr -J -x`
-- Acid test, station selection and audio: `dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c 11D -s 0xc0c6 -I`
-
-Note the channel (11D) and station (0xc0c6) are the params for Magic Radio in the UK. Depending
-on your location you will need to tweak these. I'm trying to find sources based on country but
-that is for later on, sorry.
-
-### Shairplay-sync
-These instructions are based on those detailed in https://github.com/mikebrady/shairport-sync/issues/1970
-(thanks to those who figured it out).
-
-- Build dependencies
-
-```
-sudo apt install -y --no-install-recommends build-essential git autoconf automake libtool 
-sudo apt install -y --no-install-recommends build-essential git autoconf automake libtool libpopt-dev libconfig-dev libasound2-dev avahi-daemon libavahi-client-dev libssl-dev  libsoxr-dev libplist-dev libsodium-dev libavutil-dev libavcodec-dev libavformat-dev uuid-dev libgcrypt-dev xxd jq libpipewire-0.3-dev libspa-0.2-bluetooth python3-dbus libdaemon-dev libmosquitto-dev
+### 2. Build Essentials
+```bash
+sudo apt install build-essential cmake
 ```
 
-- Install NQPTP
-```
-git clone https://github.com/mikebrady/nqptp.git
-cd nqptp
-autoreconf -fi
-./configure --with-systemd-startup
-make
-sudo make install
-sudo systemctl enable nqptp
-sudo systemctl start nqptp
-```
-- Install Shairport-sync
-```
-git clone https://github.com/mikebrady/shairport-sync.git
-cd shairport-sync
-autoreconf -fi
-./configure --sysconfdir=/etc --with-pw --with-mqtt-client --with-soxr --with-avahi \
-            --with-ssl=openssl --with-systemd --with-airplay-2 --with-metadata \
-            --with-dbus-interface --with-dbus-test-client --with-alsa --with-pw --with-pa`
-make
-sudo make install
-sudo systemctl disable shairport-sync #disable the system level instance.
+### 3. Core Radio Software
 
-```
-- Set up user shairport-sync
-- Create `~/.config/systemd/user/shairport-sync.service`. You may need to create directories
-```
-[Unit]
-Description=Shairport Sync - AirPlay Audio Receiver
-After=sound.target
-Wants=network-online.target
-After=network.target network-online.target
+#### `dablin`
+1. Install dependencies:
+   `sudo apt-get install libmpg123-dev libfaad-dev libsdl2-dev libfdk-aac-dev`
+2. Build from source (using the [lovemonkey257 fork](https://github.com/lovemonkey257/dablin.git) for PAD message support):
+   ```bash
+   sudo apt remove dablin
+   git clone https://github.com/lovemonkey257/dablin.git
+   cd dablin
+   mkdir build && cd build && cmake ..
+   make dablin && sudo cp src/dablin /usr/local/bin/
+   ```
+   *Note: Avoid `make install` to prevent building the GTK version.*
 
-[Service]
-ExecStart=/usr/local/bin/shairport-sync --log-to-syslog
+#### `eti-cmdline`
+1. Install dependencies:
+   `sudo apt install libfftw3-dev libsndfile1-dev libsamplerate0-dev librtlsdr-dev libboost-dev jq`
+2. Build:
+   ```bash
+   git clone https://github.com/JvanKatwijk/eti-stuff.git
+   cd eti-stuff/eti-cmdline
+   mkdir build && cd build
+   cmake .. -DRTLSDR=ON
+   make && sudo make install
+   ```
 
-[Install]
-WantedBy=default.target
-```
-Note that the github issue adds in a dependency on avahi-daemon (using requires/After), BUT, user
-units cannot rely on system units, there are separate. Go figure but that's how it works at the moment.
-
-- Add config for shairport-sync at `/etc/shairport-sync.conf` e.g.
-
-```
-general = {
-  name = "Dabble-Radio";
-  output_backend="pw";
-};
-alsa = {
-  mixer_control_name = "PCM";
-};
-metadata = {
-        enabled = "yes"; 
-        include_cover_art = "no"; 
-        cover_art_cache_directory = "/tmp/shairport-sync/.cache/coverart"; 
-        pipe_name = "/tmp/shairport-sync-metadata";
-        pipe_timeout = 5000; 
-};
-mqtt = {
-        enabled = "yes"; 
-        //hostname = "host.containers.internal"; // Hostname of the MQTT Broker if using podman
-        hostname = "localhost";
-        port = 1883;
-        topic = "dabble-radio"; 
-        publish_parsed = "yes"; // Whether to publish a small (but useful) subset of metadata under human-understandable topics.
-        publish_cover = "no";   // Whether to publish the cover over MQTT in binary form. This may lead to a bit of load on the broker.
-        enable_remote = "yes";  // Whether to remote control via MQTT. RC is available under `topic`/remote.
-};
-```
- 
-- Enable avahi-daemon `sudo systemctl enable avahi-daemon && sudo systemctl start avahi-daemon` 
-- Enable shairport-sync `systemctl --user enable shairport-sync.service && systemctl --user start shairport-sync.service`
-
-### MQTT
-Need to run `run-mqtt.sh`
-
-```
-#! /bin/bash
-echo "Creating storage folders"
-mkdir -p $HOME/mqtt/data
-mkdir -p $HOME/mqtt/log
-mkdir -p $HOME/mqtt/config
-mkdir -p $HOME/mqtt/config/conf.d
-
-podman stop mqtt 
-podman rm mqtt
-podman pull docker.io/eclipse-mosquitto:latest
-
-CONFIG=$HOME/mqtt/config/mosquitto.conf
-if [ ! -r $CONFIG ]; then
-        echo "Creating MQTT config: $CONFIG"
-        cat <<- 'EOF' > $CONFIG
-                allow_anonymous true
-                listener 1883 0.0.0.0
-                persistence true
-                persistence_location /mosquitto/data/
-                log_dest file /mosquitto/log/mosquitto.log
-                log_dest stdout
-                include_dir /mosquitto/config/conf.d
-EOF
-else
-        echo "Config found"
-fi
-
-podman run -d --name mqtt \
-        --label "io.containers.autoupdate=image" \
-        --restart=always \
-        -p 1883:1883 -p 9001:9001 \
-        -v $HOME/mqtt/config:/mosquitto/config:ro \
-        -v $HOME/mqtt/data:/mosquitto/data \
-        -v $HOME/mqtt/log:/mosquitto/log \
-        docker.io/eclipse-mosquitto:latest
+**Test Radio Scanning:**
+```bash
+# Check RTL device
+eti-cmdline-rtlsdr -J -x
+# Acid test (Example: Magic Radio UK - tweak channel/station for your region)
+dablin -D eti-cmdline -d eti-cmdline-rtlsdr -c 11D -s 0xc0c6 -I
 ```
 
-### Dabble
-To install:
-- `sudo apt install python3-dev python3-alsaaudio python3-pyaudio`
-- `git clone https://github.com/lovemonkey257/dabble.git`
-- `cd dabble`
-- `uv init`
-- `uv sync`
+### 4. AirPlay Support (`shairport-sync`)
 
-### Config
-This is created with a default settings on first run.
+1. **Build Dependencies:**
+   ```bash
+   sudo apt install -y --no-install-recommends build-essential git autoconf automake libtool libpopt-dev libconfig-dev libasound2-dev avahi-daemon libavahi-client-dev libssl-dev libsoxr-dev libplist-dev libsodium-dev libavutil-dev libavcodec-dev libavformat-dev uuid-dev libgcrypt-dev xxd jq libpipewire-0.3-dev libspa-0.2-bluetooth python3-dbus libdaemon-dev libmosquitto-dev
+   ```
+2. **Install NQPTP:**
+   ```bash
+   git clone https://github.com/mikebrady/nqptp.git
+   cd nqptp && autoreconf -fi && ./configure --with-systemd-startup && make && sudo make install
+   sudo systemctl enable nqptp && sudo systemctl start nqptp
+   ```
+3. **Install Shairport-sync:**
+   ```bash
+   git clone https://github.com/mikebrady/shairport-sync.git
+   cd shairport-sync
+   autoreconf -fi
+   ./configure --sysconfdir=/etc --with-pw --with-mqtt-client --with-soxr --with-avahi --with-ssl=openssl --with-systemd --with-airplay-2 --with-metadata --with-dbus-interface --with-dbus-test-client --with-alsa --with-pw --with-pa
+   make && sudo make install
+   sudo systemctl disable shairport-sync
+   ```
+4. **User Service Setup:**
+   Create `~/.config/systemd/user/shairport-sync.service`:
+   ```ini
+   [Unit]
+   Description=Shairport Sync - AirPlay Audio Receiver
+   After=sound.target
+   Wants=network-online.target
+   After=network.target network-online.target
 
-Saved state is saved into `dabble_radio.json" e.g.
+   [Service]
+   ExecStart=/usr/local/bin/shairport-sync --log-to-syslog
 
-```  
+   [Install]
+   WantedBy=default.target
+   ```
+5. **Configuration:**
+   Edit `/etc/shairport-sync.conf` to enable MQTT metadata and set the output backend to `pw` (PipeWire).
+6. **Start Services:**
+   ```bash
+   sudo systemctl enable avahi-daemon && sudo systemctl start avahi-daemon
+   systemctl --user enable shairport-sync.service && systemctl --user start shairport-sync.service
+   ```
+
+### 5. MQTT Broker
+The project uses MQTT for metadata. Run the provided `run-mqtt.sh` script to deploy a Mosquitto broker via Podman.
+
+### 6. The Dabble Application
+1. Install Python dependencies:
+   `sudo apt install python3-dev python3-alsaaudio python3-pyaudio`
+2. Install and sync the project:
+   ```bash
+   git clone https://github.com/lovemonkey257/dabble.git
+   cd dabble
+   uv init
+   uv sync
+   ```
+
+### 7. Fonts
+Install the **Noto Sans** font from [Google Fonts](https://fonts.google.com/share?selection.family=Noto+Sans:ital,wght@0,100..900;1,100..900) into `/usr/share/fonts/truetype/noto`.
+
+---
+
+## 🕹 Usage & Interface
+
+### Display Layout
+- **Top Line**: Current Mode (Radio or Airplay).
+- **Middle**: 
+  - Station Name (alternates with latest PAD message).
+  - Visualizer background.
+  - Volume bar below the visualizer.
+- **Bottom Line**: Ensemble and DAB type (standard DAB or DAB+).
+
+**AirPlay Mode**: The display automatically updates to show Track, Artist, and Album Name.
+
+### Controls
+#### Left Encoder (Navigation & Settings)
+- **Rotate**: Select a station. The station is automatically selected if left for 4 seconds.
+- **Click**: Open Menu:
+  - **Visualizations**: Graphic Equalizer, Waveform, Bar Graphic Equalizer.
+  - **Toggles**: Levels On/Off, Visualizer On/Off, Station Name On/Off.
+  - *Timeout*: Reverts to play screen after 5 seconds of inactivity.
+
+#### Right Encoder (Volume & Mode)
+- **Rotate**: Adjust volume (logarithmic scale).
+- **Click**: Open Menu:
+  - **Mode Select**: Radio Mode, Airplay Mode.
+  - **Actions**: Scan, Standby Mode.
+  - *Timeout*: Reverts to play screen after 5 seconds of inactivity.
+
+---
+
+## ⚙️ Configuration
+
+The application saves state in `dabble_radio.json`. Example configuration:
+```json
 {
     "station_name": "Heart Dance",
     "ensemble": "D1 National",
@@ -368,35 +234,23 @@ Saved state is saved into `dabble_radio.json" e.g.
     "theme_name": "default"
 }
 ```
-TODO: What else might need external configuration? Other config settings that should
-be exposed?
 
-## Font
-Install font from https://fonts.google.com/share?selection.family=Noto+Sans:ital,wght@0,100..900;1,100..900 into /usr/share/fonts/truetype/
+---
 
-The zip installs under a dir called `static` which you should rename to `noto`.
+## 🚩 Current Status & Roadmap
 
+- [ ] Fix interface issues when selecting stations.
+- [ ] Add ability to select country/default ensembles to scan.
+- [ ] Implement a way to select and update themes.
+- [ ] Configure automatic startup at boot.
+- [ ] Investigate Google Cast support (likely requires proprietary protocols; potential alternative: [shanocast](https://github.com/rgerganov/shanocast)).
 
-## Deprecated - Capture Audio from Adafruit Speaker Bonnet
-The driver for the speaker bonnet does not present a recording interface - its playback only so no
-way to sample the audio for the visualiser.
+---
 
-Using ALSA and the advice on capturing sound didn't work for me. Even AI gave up so I did it the
-old fashioned way and figured-it-out-myself. It took a while...
+## 📜 Appendix: Deprecated Notes
 
-I've created a script `init-sound-system.sh` to do this but it uses ALSA loopback and some 
-pulseaudio magic, which apparantly powers the Linux Sound sub-systems.
+### Adafruit Speaker Bonnet Capture
+The Adafruit Speaker Bonnet driver is playback-only and does not provide a recording interface for the visualizer. 
 
-The magic incantation is as follows:
-
-- Load the ALSA loop back driver `sudo modprobe snd-aloop pcm_substreams=1`
-- Define the source (from `pactl list sources short`) `SRC=alsa_output.platform-soc_107c000000_sound.stereo-fallback.monitor`
-- Define the sink i.e. loopback `SINK=alsa_output.platform-snd_aloop.0.analog-stereo`
-- Link them together `pactl load-module module-loopback source=$SRC sink=$SINK`
-
-Anything played through the Bonnet is now fed back into the loopback sink which you can then capture
-sound from. I found that the SDL sub-system picked this up automatically and I didn't need to set
-`AUDIODEV`.
-
-Eventually I gave up on the Bonnet and switched to a USB sound card as I could not control the volume.
-
+**Previous Workaround (Not Recommended):**
+Used `snd-aloop` and `pactl` loopback modules to route audio from the Bonnet back into a capture sink. This was complex and lacked volume control, leading to the switch to a USB sound card.
